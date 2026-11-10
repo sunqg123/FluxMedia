@@ -1,7 +1,6 @@
 # API 使用
 
 当前公开入口为 `FluxEngine`、`Player` 和可选 `FluxPlayerView`。
-本文基于当前源码，运行验证状态见 [项目状态](current-state.md)。
 
 ## 创建与关闭
 
@@ -10,11 +9,11 @@ using FluxMedia.Playback;
 
 FluxEngine.Start(new FluxEngineOptions
 {
-    FFmpegPath = @"D:\Tools\ffmpeg\bin",
+    FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
     ThrowOnMissingFFmpeg = true
 });
 await using var player = FluxEngine.CreatePlayer();
-await player.OpenAndPlayAsync(@"D:\media\video.mp4");
+await player.OpenAndPlayAsync("video.mp4");
 await player.PauseAsync();
 await player.ResumeAsync();
 await player.StopAsync();
@@ -47,7 +46,7 @@ TimelineId 可关联同一次时间线的出帧与呈现日志。`FluxPlayerView
 ## 录制与日志
 
 ```csharp
-await player.StartRecordingAsync(@"D:\media\recording.mp4");
+await player.StartRecordingAsync("recording.mp4");
 await player.StopRecordingAsync();
 ```
 

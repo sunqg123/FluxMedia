@@ -1,7 +1,6 @@
 # 当前架构
 
 公开创建入口为 `FluxEngine.CreatePlayer`。业务控制走 `Player`，原生线程、设备及会话为内部实现。
-最新修改状态见 [项目状态](current-state.md)，本页描述源码设计，不表示运行验证已经通过。
 
 ```mermaid
 flowchart TD

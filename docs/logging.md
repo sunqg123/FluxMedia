@@ -11,14 +11,14 @@ using FluxMedia.Core.Logging;
 
 FluxEngine.Start(new FluxEngineOptions
 {
-    FFmpegPath = @"D:\Tools\ffmpeg\bin",
+    FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
     EnableLogging = true,
     LogDirectory = "Logs"
 });
 FluxMediaLog.Info("Application", "播放器已启动");
 ```
 
-库默认关闭日志。当前两个交互示例显式开启，目录为各自程序输出目录下的 Logs。
+库默认关闭日志。Avalonia 示例显式开启，目录为程序输出目录下的 Logs。
 实际文件路径由 FluxMediaLog.CurrentLogFilePath 或 FluxEngine.CurrentLogFilePath 读取。
 
 宿主也可使用 Configure、UseFile、UseConsole 或 SetSink 设置自己的目标。
@@ -34,6 +34,5 @@ FluxMediaLog.Info("Application", "播放器已启动");
 - SeekFrameScheduling：定位首帧的调度策略。
 - VideoTimelinePresented：同一 TimelineId 的首次 Avalonia 显示提交。
 
-FirstUI 是核心帧回调，不是物理显示时刻。当前修改效果仍待用户操作后确认。
+FirstUI 是核心帧回调，不是物理显示时刻。
 读取或分享日志时应过滤源认证信息，原始运行日志不提交到 Git。
-详细证据见 [Seek 日志分析](seek-log-analysis.md)。

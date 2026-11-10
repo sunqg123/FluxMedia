@@ -9,19 +9,19 @@ using FluxMedia.Playback;
 
 FluxEngine.Start(new FluxEngineOptions
 {
-    FFmpegPath = @"D:\Tools\ffmpeg\bin",
+    FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
     ThrowOnMissingFFmpeg = true,
     EnableLogging = false
 });
 
 await using var player = FluxEngine.CreatePlayer();
 
-await player.OpenAndPlayAsync(@"D:\media\demo.mp4");
+await player.OpenAndPlayAsync("video.mp4");
 await player.SeekAsync(TimeSpan.FromSeconds(30));
 await player.SetVolumeAsync(0.6);
 await player.PauseAsync();
 await player.ResumeAsync();
-await player.StartRecordingAsync(@"D:\media\clip.mp4");
+await player.StartRecordingAsync("recording.mp4");
 await player.StopRecordingAsync();
 await player.StopAsync();
 ```

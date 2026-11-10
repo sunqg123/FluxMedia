@@ -3,7 +3,6 @@
 当前默认托管绑定为 FFmpeg.AutoGen 9.0.1.1。NuGet 包不分发 FFmpeg 原生库。
 应用使用 `FluxEngineOptions.FFmpegPath` 或 `FLUXMEDIA_FFMPEG_ROOT` 指定共享库目录。
 源码仓库通过 Git LFS 提供 Windows x64 原生库与命令行工具，执行 `git lfs pull` 后可在 `FFmpeg/win-x64/native` 找到；这不改变 NuGet 包的分发范围。
-本轮源码修改未构建、未测试；旧测量结果不能代表当前版本。
 
 ## 统一维护位置
 
@@ -41,9 +40,8 @@ macOS 使用 `lib{name}.{major}.dylib`。Unix 部署需要保留对应 ABI 名�
 
 ## 当前版本适配边界
 
-目标是按实际 API 能力支持不同 FFmpeg 版本；当前尚未实现任意主版本适配。
-当前源码直接访问 AutoGen 结构体，不能只替换 DLL 或修改绑定包版本就认定兼容。
-后续升级需同时检查结构布局、导出函数与调用约定，再由用户安排统一验证。
+当前源码直接访问 AutoGen 结构体，原生库需要匹配绑定 ABI。
+跨主版本升级需检查结构布局、导出函数与调用约定，不能只替换 DLL 或修改绑定包版本。
 
 `FFmpegAutoGenVersion` 仅集中配置托管依赖版本，不代表所有绑定版本均可直接编译。
 测试源码的素材工具目录统一读取 FFmpegFactAttribute.NativeRoot，优先使用 FLUXMEDIA_FFMPEG_ROOT。
@@ -60,5 +58,3 @@ Linux 音频还需要 OpenAL；macOS 使用系统 OpenAL Framework，相关平�
 
 原生库的 LGPL/GPL 与编解码配置由应用分发方选择，
 见 `THIRD-PARTY-NOTICES.txt` 和 `licenses/`。
-
-当前实现与未验证项见 [项目状态](current-state.md)。

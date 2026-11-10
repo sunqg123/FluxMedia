@@ -1,9 +1,8 @@
 # FluxMedia
 
-FluxMedia 是开发中的 C# 播放核心，提供本地文件、网络播放、音频输出、Seek、录制和可选 Avalonia 显示控件。
+FluxMedia 是 C# 播放核心，提供本地文件、网络播放、音频输出、Seek、录制和可选 Avalonia 显示控件。
 
 播放核心可用于自定义 UI，Avalonia 控件提供视频显示与播放器绑定。
-项目仍在开发，最新 Seek 和帧调度修改尚未完成运行验证，进展见 [项目状态](docs/current-state.md)。
 
 ## 主要功能
 
@@ -82,18 +81,16 @@ await player.StopAsync();
 获取 Git LFS 文件后，可使用仓库根目录的 `Sample.mp4`，也可自行选择媒体文件。
 
 `tests` 保存核心回归用例和 Avalonia 消费项目。CI 仅手动触发，测试需显式启用；
-原生媒体测试还需要匹配的共享库和命令行工具。当前源码的验证状态见项目状态文档。
+原生媒体测试还需要匹配的共享库和命令行工具。
 生成输出和日志仍由 Git 忽略规则排除；`Sample.mp4` 和 FFmpeg 目录中的 DLL/EXE 通过 Git LFS 管理。
 
 ## 文档
 
-- [当前状态与维护规则](docs/current-state.md)
 - [API 使用](docs/api.md)
 - [架构](docs/architecture.md)
 - [FFmpeg 部署与版本边界](docs/ffmpeg-deployment.md)
 - [日志](docs/logging.md)
 - [Seek 交互与权限](docs/seek-preview.md)
-- [用户 Seek 日志分析](docs/seek-log-analysis.md)
 - [原生库目录](FFmpeg/README.md) · [测试目录](tests/README.md)
 
 ## 许可证
