@@ -25,6 +25,8 @@ public sealed class ExternalNetworkPlaybackTests
     /// </summary>
     private static async Task VerifyAsync(string variable)
     {
+        FluxEngine.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot });
         var firstFrame = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var player = FluxEngine.CreatePlayer();
         player.VideoFrameReady += (_, _) => firstFrame.TrySetResult();
@@ -32,11 +34,7 @@ public sealed class ExternalNetworkPlaybackTests
         {
             var result = await player.OpenAndPlayAsync(Environment.GetEnvironmentVariable(variable)!, new PlaybackOptions
             {
-                Network = NetworkPlaybackOptions.Compatible(),
-                NativeLibraries = new NativeLibraryOptions
-                {
-                    FFmpegRootDirectory = FFmpegFactAttribute.NativeRoot
-                }
+                Network = NetworkPlaybackOptions.Compatible()
             });
             Assert.True(result.IsSuccess, "外部流未能开始播放。");
             await firstFrame.Task.WaitAsync(TimeSpan.FromSeconds(20));

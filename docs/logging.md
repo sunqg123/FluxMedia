@@ -12,13 +12,13 @@ using FluxMedia.Core.Logging;
 FluxEngine.Start(new FluxEngineOptions
 {
     FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
-    EnableLogging = true,
-    LogDirectory = "Logs"
+    EnableLogging = true
 });
 FluxMediaLog.Info("Application", "播放器已启动");
 ```
 
-库默认关闭日志。Avalonia 示例显式开启，目录为程序输出目录下的 Logs。
+引擎通过 `EnableLogging` 控制日志，默认关闭。开启后使用程序输出目录下的 Logs 和默认日志级别，不需要传入目录。
+Avalonia 示例显式开启日志。
 实际文件路径由 FluxMediaLog.CurrentLogFilePath 或 FluxEngine.CurrentLogFilePath 读取。
 
 宿主也可使用 Configure、UseFile、UseConsole 或 SetSink 设置自己的目标。

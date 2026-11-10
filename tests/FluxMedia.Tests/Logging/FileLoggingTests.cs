@@ -11,27 +11,30 @@ namespace FluxMedia.Tests;
 public sealed class FileLoggingTests
 {
     /// <summary>
-    /// 首个库文件损坏时继续搜索后续有效路径。
+    /// 显式目录不完整时使用环境变量中的完整目录。
     /// </summary>
-    [FFmpegFact]
-    public void NativeLibraryLoader_TriesOtherPathsBeforeThrowing()
+    [Fact]
+    public void NativeLibraryLoader_UsesEnvironmentWhenExplicitDirectoryIsIncomplete()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "FluxMediaNativeSearch", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        var directory = Path.Combine(Path.GetTempPath(), "FluxMediaNativePath", Guid.NewGuid().ToString("N"));
+        var explicitRoot = Path.Combine(directory, "explicit");
+        var environmentRoot = Path.Combine(directory, "environment");
+        var previous = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT");
+        Directory.CreateDirectory(explicitRoot);
+        Directory.CreateDirectory(environmentRoot);
         try
         {
-            File.WriteAllText(Path.Combine(directory, "kernel32.dll"), "invalid library");
-            var system = Environment.GetFolderPath(Environment.SpecialFolder.System);
-            var result = new NativeLibraryLoader(new NativeLibraryOptions
-            {
-                FFmpegRootDirectory = directory,
-                AdditionalSearchDirectories = new[] { system },
-                ThrowOnMissingLibrary = true
-            }).TryLoad(new NativeLibraryDescriptor("kernel32", new[] { "kernel32.dll" }));
-            Assert.True(result.IsLoaded);
-            Assert.Equal(Path.Combine(system, "kernel32.dll"), result.LoadedPath);
+            foreach (var name in FFmpegLibraries.RequiredFileNames)
+                File.WriteAllBytes(Path.Combine(environmentRoot, name), Array.Empty<byte>());
+            Environment.SetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT", environmentRoot);
+            var loader = new NativeLibraryLoader(explicitRoot);
+            Assert.Equal(environmentRoot, loader.ResolveDirectory());
         }
-        finally { Directory.Delete(directory, true); }
+        finally
+        {
+            Environment.SetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT", previous);
+            Directory.Delete(directory, true);
+        }
     }
 
     /// <summary>
@@ -109,21 +112,23 @@ public sealed class FileLoggingTests
     /// <summary>
     /// 引擎重复启动沿用已创建的日志输出。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public void Engine_StartIsIdempotentAndWritesFile()
     {
         FluxEngine.Shutdown(); FluxMediaLog.Shutdown();
-        var directory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"));
+        var message = "Event=EngineSmoke Token=" + Guid.NewGuid().ToString("N");
         try
         {
-            FluxEngine.Start(new FluxEngineOptions { EnableLogging = true, LogDirectory = directory, LogLevel = LogLevel.Debug });
+            FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot, EnableLogging = true });
             var path = FluxEngine.CurrentLogFilePath;
-            FluxEngine.Start(new FluxEngineOptions { LogDirectory = directory + "-unused" });
-            FluxMediaLog.Info("EngineTest", "Event=EngineSmoke");
+            FluxEngine.Start();
+            Assert.Throws<InvalidOperationException>(() =>
+                FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot, EnableLogging = false }));
+            FluxMediaLog.Info("EngineTest", message);
             FluxMediaLog.Flush();
             Assert.Equal(path, FluxEngine.CurrentLogFilePath);
             Assert.True(FluxEngine.IsStarted);
-            Assert.Contains("Event=EngineSmoke", File.ReadAllText(path!));
+            Assert.Contains(message, File.ReadAllText(path!));
         }
         finally { FluxEngine.Shutdown(); }
     }
@@ -131,12 +136,12 @@ public sealed class FileLoggingTests
     /// <summary>
     /// 引擎只关闭自己创建的文件输出。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public void Engine_ShutdownClosesOwnedLogging()
     {
         FluxEngine.Shutdown(); FluxMediaLog.Shutdown();
-        var directory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"));
-        FluxEngine.Start(new FluxEngineOptions { EnableLogging = true, LogDirectory = directory });
+        var directory = Path.Combine(AppContext.BaseDirectory, "Logs");
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot, EnableLogging = true });
         Assert.True(FluxMediaLog.IsEnabled);
         Assert.Equal(directory, FluxMediaLog.LogDirectory);
         FluxEngine.Shutdown();
@@ -145,40 +150,27 @@ public sealed class FileLoggingTests
     }
 
     /// <summary>
-    /// 原生库加载器使用显式配置，不读取隐藏的运行时状态。
+    /// 完整的显式目录优先于环境变量。
     /// </summary>
     [Fact]
-    public void NativeLibraryLoader_UsesOnlyExplicitConfiguration()
+    public void NativeLibraryLoader_UsesExplicitDirectoryFirst()
     {
-        var root = Path.Combine(Path.GetTempPath(), "FluxMediaTests", "native");
-        var extra = Path.Combine(Path.GetTempPath(), "FluxMediaTests", "extra");
-        var directories = new NativeLibraryLoader(new NativeLibraryOptions
+        var directory = Path.Combine(Path.GetTempPath(), "FluxMediaNativePath", Guid.NewGuid().ToString("N"));
+        var previous = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT");
+        Directory.CreateDirectory(directory);
+        try
         {
-            FFmpegRootDirectory = root,
-            AdditionalSearchDirectories = new[] { extra }
-        }).BuildSearchDirectories();
-        Assert.Equal(root, directories[0]);
-        Assert.Contains(extra, directories);
+            foreach (var name in FFmpegLibraries.RequiredFileNames)
+                File.WriteAllBytes(Path.Combine(directory, name), Array.Empty<byte>());
+            Environment.SetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT", Path.Combine(directory, "unused"));
+            var loader = new NativeLibraryLoader(directory);
+            Assert.Equal(directory, loader.ResolveDirectory());
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT", previous);
+            Directory.Delete(directory, true);
+        }
     }
 
-    /// <summary>
-    /// 唯一配置合并入口保留显式路径并继承引擎的附加路径。
-    /// </summary>
-    [Fact]
-    public void EngineOptions_MergeKeepsExplicitRootAndCombinesSearchPaths()
-    {
-        var defaults = new FluxEngineOptions
-        {
-            FFmpegPath = "engine-native",
-            FFmpegSearchPaths = new[] { "engine-extra" },
-            DefaultOpenTimeout = TimeSpan.FromSeconds(9)
-        };
-        var merged = defaults.Merge(new PlaybackOptions
-        {
-            NativeLibraries = new NativeLibraryOptions { FFmpegRootDirectory = "player-native", AdditionalSearchDirectories = new[] { "player-extra" } }
-        });
-        Assert.Equal("player-native", merged.NativeLibraries.FFmpegRootDirectory);
-        Assert.Equal(new[] { "engine-extra", "player-extra" }, merged.NativeLibraries.AdditionalSearchDirectories);
-        Assert.Equal(TimeSpan.FromSeconds(9), defaults.Merge(null).OpenTimeout);
-    }
 }

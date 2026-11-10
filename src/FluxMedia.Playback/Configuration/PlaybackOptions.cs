@@ -1,4 +1,3 @@
-using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Models;
 
 namespace FluxMedia.Playback;
@@ -47,11 +46,6 @@ public sealed record PlaybackOptions
     /// 硬件解码的启用策略。
     /// </summary>
     public VideoAccelerationMode VideoAcceleration { get; init; } = VideoAccelerationMode.Auto;
-
-    /// <summary>
-    /// FFmpeg 原生库的查找配置。
-    /// </summary>
-    public NativeLibraryOptions NativeLibraries { get; init; } = new();
 }
 
 /// <summary>

@@ -30,22 +30,12 @@ public static class FFmpegLibraries
     /// <summary>
     /// 当前绑定在本平台需要的原生库。
     /// </summary>
-    internal static IReadOnlyList<NativeLibraryDescriptor> RequiredLibraries { get; } = Array.AsReadOnly(Libraries.Select(library => new NativeLibraryDescriptor(library.Name, Array.AsReadOnly(new[] { GetFileName(library.Name, library.Major) }))).ToArray());
+    internal static IReadOnlyList<NativeLibraryDescriptor> RequiredLibraries { get; } = Array.AsReadOnly(Libraries.Select(library => new NativeLibraryDescriptor(library.Name, GetFileName(library.Name, library.Major))).ToArray());
 
     /// <summary>
     /// 当前平台所需的完整库名，不加载原生库。
     /// </summary>
-    public static IReadOnlyList<string> RequiredFileNames { get; } = Array.AsReadOnly(RequiredLibraries.Select(library => library.FileNames[0]).ToArray());
-
-    /// <summary>
-    /// 当前平台的 ffmpeg 命令行文件名。
-    /// </summary>
-    public static string FFmpegExecutableName => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffmpeg.exe" : "ffmpeg";
-
-    /// <summary>
-    /// 当前平台的 ffprobe 命令行文件名。
-    /// </summary>
-    public static string FFprobeExecutableName => RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "ffprobe.exe" : "ffprobe";
+    public static IReadOnlyList<string> RequiredFileNames { get; } = Array.AsReadOnly(RequiredLibraries.Select(library => library.FileName).ToArray());
 
     /// <summary>
     /// 只检查完整库文件是否存在，不加载或执行原生代码。

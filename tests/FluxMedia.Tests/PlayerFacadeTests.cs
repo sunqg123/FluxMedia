@@ -13,6 +13,53 @@ namespace FluxMedia.Tests;
 public sealed class PlayerFacadeTests
 {
     /// <summary>
+    /// 未显式启动时创建播放器应立即失败。
+    /// </summary>
+    [Fact]
+    public void FluxEngine_CreatePlayerWithoutStartThrows()
+    {
+        FluxEngine.Shutdown();
+        var error = Assert.Throws<InvalidOperationException>(() => FluxEngine.CreatePlayer());
+        Assert.Contains("FluxEngine.Start", error.Message, StringComparison.Ordinal);
+        Assert.False(FluxEngine.IsStarted);
+        Assert.Empty(FluxEngine.Players);
+    }
+
+    /// <summary>
+    /// 初始化失败直接抛异常，不登记启动状态。
+    /// </summary>
+    [Fact]
+    public void FluxEngine_FailedStartThrowsAndDoesNotMarkStarted()
+    {
+        FluxEngine.Shutdown();
+        var previous = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT");
+        try
+        {
+            Environment.SetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT", null);
+            var directory = Path.Combine(Path.GetTempPath(), "FluxMediaMissingNative-" + Guid.NewGuid().ToString("N"));
+            var error = Assert.Throws<InvalidOperationException>(() =>
+                FluxEngine.Start(new FluxEngineOptions { FFmpegPath = directory }));
+            Assert.Contains("FFmpeg 初始化失败", error.Message, StringComparison.Ordinal);
+            Assert.NotNull(error.InnerException);
+            Assert.False(FluxEngine.IsStarted);
+            Assert.Empty(FluxEngine.Players);
+            Assert.Throws<InvalidOperationException>(() => FluxEngine.CreatePlayer());
+        }
+        finally { Environment.SetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT", previous); }
+    }
+
+    /// <summary>
+    /// 就绪检查不替调用方初始化原生环境。
+    /// </summary>
+    [Fact]
+    public void NativeRuntime_EnsureInitializedDoesNotStartImplicitly()
+    {
+        FluxEngine.Shutdown();
+        Assert.Throws<InvalidOperationException>(() => FluxMedia.FFmpeg.Native.FFmpegNativeRuntime.EnsureInitialized());
+        Assert.False(FluxMedia.FFmpeg.Native.FFmpegNativeRuntime.IsInitialized);
+    }
+
+    /// <summary>
     /// 单个帧订阅者抛出异常不阻断后续显示端。
     /// </summary>
     [Fact]
@@ -30,9 +77,11 @@ public sealed class PlayerFacadeTests
     /// <summary>
     /// 验证公开入口可创建多个独立播放器。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public async Task PlayerFacade_CanCreateMultipleIndependentPlayers()
     {
+        FluxEngine.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot });
         await using var first = FluxEngine.CreatePlayer();
         await using var second = FluxEngine.CreatePlayer();
 
@@ -46,13 +95,13 @@ public sealed class PlayerFacadeTests
     /// <summary>
     /// 验证引擎登记新播放器并移除已释放实例。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public async Task FluxEngine_TracksCreatedPlayersAndUnregistersDisposedPlayers()
     {
         FluxEngine.Shutdown();
         FluxEngine.Start(new FluxEngineOptions
         {
-            LogDirectory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"), "Logs")
+            FFmpegPath = FFmpegFactAttribute.NativeRoot
         });
 
         var first = FluxEngine.CreatePlayer();
@@ -73,9 +122,11 @@ public sealed class PlayerFacadeTests
     /// <summary>
     /// 验证字符串入口正确区分网络地址和本地路径。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public async Task PlayerFacade_OpenStringTreatsHttpAsNetworkAndLocalPathAsFile()
     {
+        FluxEngine.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot });
         await using var player = FluxEngine.CreatePlayer();
 
         await Assert.ThrowsAsync<PlaybackException>(async () =>
@@ -95,13 +146,13 @@ public sealed class PlayerFacadeTests
     /// <summary>
     /// 验证重复启动引擎不会重复初始化。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public void FluxEngine_StartIsIdempotent()
     {
         FluxEngine.Shutdown();
         FluxEngine.Start(new FluxEngineOptions
         {
-            LogDirectory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"), "Logs")
+            FFmpegPath = FFmpegFactAttribute.NativeRoot
         });
         FluxEngine.Start();
 
@@ -114,16 +165,16 @@ public sealed class PlayerFacadeTests
     /// <summary>
     /// 验证引擎提供当前日志目录和文件路径。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public void FluxEngine_ExposesLogPathsForDiagnostics()
     {
-        var logDirectory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"), "Logs");
+        var logDirectory = Path.Combine(AppContext.BaseDirectory, "Logs");
 
         FluxEngine.Shutdown();
         FluxEngine.Start(new FluxEngineOptions
         {
-            EnableLogging = true,
-            LogDirectory = logDirectory
+            FFmpegPath = FFmpegFactAttribute.NativeRoot,
+            EnableLogging = true
         });
 
         Assert.Equal(logDirectory, FluxEngine.LogDirectory);
@@ -135,60 +186,33 @@ public sealed class PlayerFacadeTests
     }
 
     /// <summary>
-    /// 验证默认启动不创建日志目录。
+    /// 默认启动不启用文件日志。
     /// </summary>
-    [Fact]
-    public void FluxEngine_StartDoesNotCreateLogDirectoryByDefault()
+    [FFmpegFact]
+    public void FluxEngine_StartDoesNotEnableLoggingByDefault()
     {
-        var logDirectory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"), "Logs");
-
         FluxEngine.Shutdown();
-        FluxEngine.Start(new FluxEngineOptions
+        FluxMediaLog.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot });
+        try
         {
-            LogDirectory = logDirectory
-        });
-
-        Assert.Null(FluxEngine.LogDirectory);
-        Assert.Null(FluxEngine.CurrentLogFilePath);
-        Assert.False(Directory.Exists(logDirectory));
-
-        FluxEngine.Shutdown();
-        FluxEngine.Shutdown(); FluxMediaLog.Shutdown();
-    }
-
-    /// <summary>
-    /// 验证禁用日志级别时不创建日志目录。
-    /// </summary>
-    [Fact]
-    public void FluxEngine_StartWithLogLevelNoneDoesNotCreateLogDirectory()
-    {
-        var logDirectory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"), "Logs");
-
-        FluxEngine.Shutdown();
-        FluxEngine.Start(new FluxEngineOptions
-        {
-            LogLevel = LogLevel.None,
-            LogDirectory = logDirectory
-        });
-
-        Assert.Null(FluxEngine.LogDirectory);
-        Assert.Null(FluxEngine.CurrentLogFilePath);
-        Assert.False(Directory.Exists(logDirectory));
-
-        FluxEngine.Shutdown();
-        FluxEngine.Shutdown(); FluxMediaLog.Shutdown();
+            Assert.False(FluxMediaLog.IsEnabled);
+            Assert.Null(FluxEngine.LogDirectory);
+            Assert.Null(FluxEngine.CurrentLogFilePath);
+        }
+        finally { FluxEngine.Shutdown(); }
     }
 
     /// <summary>
     /// 验证关闭引擎时释放已登记的播放器。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public async Task FluxEngine_ShutdownDisposesTrackedPlayers()
     {
         FluxEngine.Shutdown();
         FluxEngine.Start(new FluxEngineOptions
         {
-            LogDirectory = Path.Combine(Path.GetTempPath(), "FluxMediaTests", Guid.NewGuid().ToString("N"), "Logs")
+            FFmpegPath = FFmpegFactAttribute.NativeRoot
         });
         var first = FluxEngine.CreatePlayer();
         var second = FluxEngine.CreatePlayer();

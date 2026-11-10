@@ -114,9 +114,7 @@ internal sealed class PlaybackRecordingController
                 _snapshot = await demuxer.StopRecordingAsync(cancellationToken).ConfigureAwait(false) ?? _snapshot;
             else
                 _snapshot = _snapshot with { State = PlaybackRecordingState.Completed, StoppedAt = DateTimeOffset.UtcNow };
-            return _snapshot.State == PlaybackRecordingState.Completed
-                ? PlaybackResult.Success()
-                : PlaybackResult.Failure(PlaybackError.RecordingFailed, _snapshot.LastError ?? "录制未能正常完成。");
+            return _snapshot.State == PlaybackRecordingState.Completed                ? PlaybackResult.Success()                : PlaybackResult.Failure(PlaybackError.RecordingFailed, _snapshot.LastError ?? "录制未能正常完成。");
         }
         catch (Exception exception)
         {
@@ -128,8 +126,7 @@ internal sealed class PlaybackRecordingController
     /// <summary>
     /// 返回当前活动录制器或最近一次封装状态。
     /// </summary>
-    public PlaybackRecordingDiagnosticInfo Snapshot(FFmpegSharedDemuxer? demuxer) =>
-        IsRecording ? _detached?.Diagnostic ?? demuxer?.RecordingDiagnostic ?? _snapshot : _snapshot;
+    public PlaybackRecordingDiagnosticInfo Snapshot(FFmpegSharedDemuxer? demuxer) =>        IsRecording ? _detached?.Diagnostic ?? demuxer?.RecordingDiagnostic ?? _snapshot : _snapshot;
     /// <summary>
     /// 打开新媒体前清除已结束录制的诊断。
     /// </summary>

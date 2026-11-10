@@ -80,7 +80,6 @@ internal sealed unsafe class FFmpegStreamDescriptor : IDisposable
             {
                 throw new ObjectDisposedException(nameof(FFmpegStreamDescriptor));
             }
-
             return _codecParameters;
         }
     }
@@ -90,11 +89,7 @@ internal sealed unsafe class FFmpegStreamDescriptor : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         var parameters = _codecParameters;
         _codecParameters = null;
         if (parameters != null)

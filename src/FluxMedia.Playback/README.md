@@ -10,7 +10,6 @@ using FluxMedia.Playback;
 FluxEngine.Start(new FluxEngineOptions
 {
     FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
-    ThrowOnMissingFFmpeg = true,
     EnableLogging = false
 });
 

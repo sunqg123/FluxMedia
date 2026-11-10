@@ -71,8 +71,7 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     /// <summary>
     /// 创建独立管线，打开、重播、跳转重建和重连均使用此入口。
     /// </summary>
-    public PlaybackPipeline(MediaSource source, PlaybackOptions options, Guid instanceId, TimeSpan position,
-        PlaybackVideoFrameHub output, PlaybackPipelineCallbacks callbacks, CancellationToken operationToken)
+    public PlaybackPipeline(MediaSource source, PlaybackOptions options, Guid instanceId, TimeSpan position,        PlaybackVideoFrameHub output, PlaybackPipelineCallbacks callbacks, CancellationToken operationToken)
     {
         _source = source;
         _options = options;

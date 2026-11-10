@@ -9,14 +9,19 @@
     <Authors>FluxMedia</Authors>
     <Description>Avalonia 11/12 playback controls for FluxMedia on .NET 6 and later, targeting .NET Standard 2.1.</Description>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <DebugType>None</DebugType>
-    <DebugSymbols>false</DebugSymbols>
+    <DebugType Condition="'$(Configuration)' != 'Debug'">none</DebugType>
+    <DebugSymbols Condition="'$(Configuration)' != 'Debug'">false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PackageReleaseNotes>FluxMedia 1.1.1: smoother progress-bar seeking and the matching FluxMedia.Playback 1.1.1 dependency with lifecycle, performance, dependency propagation, and opt-in logging fixes.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <Optimize>false</Optimize>
   </PropertyGroup>
 
   <ItemGroup>

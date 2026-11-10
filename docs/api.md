@@ -10,7 +10,6 @@ using FluxMedia.Playback;
 FluxEngine.Start(new FluxEngineOptions
 {
     FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
-    ThrowOnMissingFFmpeg = true
 });
 await using var player = FluxEngine.CreatePlayer();
 await player.OpenAndPlayAsync("video.mp4");
@@ -19,7 +18,12 @@ await player.ResumeAsync();
 await player.StopAsync();
 ```
 
-应用退出时调用 `FluxEngine.ShutdownAsync`。需要自定义原生目录时先配置引擎。
+`FluxEngine.Start` 是唯一的初始化入口，必须在创建播放器之前成功调用。
+`FluxEngineOptions` 仅包含 `FFmpegPath` 和 `EnableLogging`。媒体超时等参数放在 `PlaybackOptions` 中。
+缺少库、加载失败、ABI 不匹配或网络组件初始化失败均抛出异常，失败不会登记已启动状态。
+`CreatePlayer` 不会隐式启动或重试初始化；未启动或正在关闭时抛出 `InvalidOperationException`。
+重复启动可复用相同配置，传入不同配置会被拒绝。原生库路径只在引擎启动时配置，不属于媒体播放选项。
+应用退出时调用 `FluxEngine.ShutdownAsync`。原生库和函数绑定保留到进程退出，切换库目录需重启进程。
 
 ## 自定义进度 UI
 

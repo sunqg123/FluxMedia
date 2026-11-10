@@ -842,8 +842,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         catch (ObjectDisposedException) when (_disposed) { }
         catch (Exception exception)
         {
-            FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId,
-                $"Event=SeekBindingFailed TargetSeconds={seconds} ExceptionType={exception.GetType().Name}");
+            FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId, $"Event=SeekBindingFailed TargetSeconds={seconds} ExceptionType={exception.GetType().Name}");
         }
         finally
         {
@@ -861,5 +860,4 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     {
         if (_disposed) throw new ObjectDisposedException(nameof(Player));
     }
-
 }

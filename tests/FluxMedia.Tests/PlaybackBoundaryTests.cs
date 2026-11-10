@@ -57,9 +57,11 @@ public sealed class PlaybackBoundaryTests
     /// <summary>
     /// 仅保留引擎创建入口，不再导出独立 Runtime 和兼容工厂。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public async Task Engine_IsTheOnlyPublicCreationEntryPoint()
     {
+        FluxEngine.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot });
         await using var player = FluxEngine.CreatePlayer();
         Assert.Equal(PlaybackState.Created, player.State);
         var assembly = typeof(Player).Assembly;
@@ -72,9 +74,11 @@ public sealed class PlaybackBoundaryTests
     /// <summary>
     /// 验证多个播放器的实例和会话相互隔离。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public async Task PlaybackFacade_MultiplePlayersAreIsolated()
     {
+        FluxEngine.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot });
         await using var first = FluxEngine.CreatePlayer();
         await using var second = FluxEngine.CreatePlayer();
 

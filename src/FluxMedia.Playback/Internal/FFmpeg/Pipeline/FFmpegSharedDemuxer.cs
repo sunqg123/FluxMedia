@@ -159,8 +159,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 初始化 FFmpeg 共享解复用器所需的状态和资源。
     /// </summary>
-    public FFmpegSharedDemuxer(
-        MediaSource source, PlaybackOptions options, Guid instanceId, TimeSpan startPosition, int videoQueueCapacity = 4, int audioQueueCapacity = 24, bool deferPacketReading = false)
+    public FFmpegSharedDemuxer(MediaSource source, PlaybackOptions options, Guid instanceId, TimeSpan startPosition, int videoQueueCapacity = 4, int audioQueueCapacity = 24, bool deferPacketReading = false)
     {
         _source = source;
         _options = options;
@@ -366,8 +365,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             {
                 var seek = (DemuxSeekRequest)state!;
                 seek.TryCancel();
-            }, request)
-            : default;
+            }, request) : default;
         if (cancellationToken.CanBeCanceled)
         {
             _ = request.Task.ContinueWith(static (_, state) => ((CancellationTokenRegistration)state!).Dispose(), registration, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
@@ -443,7 +441,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     /// </summary>
     private void DemuxLoop(CancellationToken cancellationToken)
     {
-        FFmpegNativeRuntime.EnsureInitialized(_options.NativeLibraries);
+        FFmpegNativeRuntime.EnsureInitialized();
 
         AVFormatContext* formatContext = null;
         AVDictionary* dictionary = null;
@@ -946,7 +944,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             throw new InvalidOperationException("No audio or video streams are available for recording.");
         }
 
-        var recording = new FFmpegPacketRemuxRecorder(options, _options.NativeLibraries, _instanceId, VideoStream, AudioStream);
+        var recording = new FFmpegPacketRemuxRecorder(options, _instanceId, VideoStream, AudioStream);
         recording.Start();
         lock (_recordingSync)
         {

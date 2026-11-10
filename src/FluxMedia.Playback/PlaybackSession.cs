@@ -1,4 +1,3 @@
-using FluxMedia.Playback.Internal.Audio;
 using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Errors;
 using FluxMedia.Core.Logging;
@@ -1668,5 +1667,4 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
         _lastControlError = result.IsSuccess ? null : result.Message;
         return result;
     }
-
 }

@@ -23,7 +23,7 @@ FluxMedia 是 C# 播放核心，提供本地文件、网络播放、音频输出
 | `samples/FluxMedia.Avalonia.Sample` | 通过项目引用使用播放器的示例 |
 | `tests` | 当前单元、回归及 UI 消费项目源码，按需手动执行 |
 | `licenses` | 打包引用的第三方许可证 |
-| `FFmpeg` | Windows x64 原生库、命令行工具和部署说明 |
+| `FFmpeg` | Windows x64 原生库 |
 | `docs` | 当前 API、架构、部署和诊断说明 |
 | `Sample.mp4` | 示例视频素材 |
 
@@ -42,16 +42,17 @@ git lfs pull
 ```
 
 已有本地仓库可在拉取更新后执行 `git lfs pull` 获取完整文件。
-Windows x64 示例默认查找：
+Sample 本地运行时，按当前平台和架构直接使用仓库中的固定位置：
 
 ```text
-FFmpeg/win-x64/native/
+FFmpeg/<RID>/native/
 ```
 
-也可以通过 `FLUXMEDIA_FFMPEG_ROOT` 或 `FluxEngineOptions.FFmpegPath` 指定实际库目录。
+核心优先检查 `FluxEngineOptions.FFmpegPath`；未指定、目录不存在或所需库不完整时，再检查 `FLUXMEDIA_FFMPEG_ROOT`。
+核心不扫描其他默认目录。Sample 先读取环境变量，未找到完整库时从程序目录向父目录查找 `FFmpeg/<RID>/native`，将结果传入核心；不向 bin 或发布目录复制原生库。
 当前默认绑定为 `FFmpeg.AutoGen 9.0.1.1`，版本集中配置在 `Directory.Build.props`。
 原生库必须匹配绑定 ABI；任意 FFmpeg 主版本自动适配尚未实现。
-其他平台需自行准备对应的共享库。详细目录结构见 [原生库部署说明](FFmpeg/README.md)。
+其他平台需自行准备对应的共享库。详细目录结构见 [原生库部署说明](docs/ffmpeg-deployment.md)。
 
 ## 基本使用
 
@@ -61,7 +62,6 @@ using FluxMedia.Playback;
 FluxEngine.Start(new FluxEngineOptions
 {
     FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
-    ThrowOnMissingFFmpeg = true,
     EnableLogging = true
 });
 
@@ -73,7 +73,9 @@ await player.StopAsync();
 ```
 
 示例中的媒体路径按实际文件替换；引擎初始化前需配置好原生库路径。
-创建播放器统一使用 `FluxEngine.CreatePlayer`。宿主退出时先释放播放器，再调用 `FluxEngine.ShutdownAsync`。
+应用启动时先调用一次 `FluxEngine.Start`，成功后再用 `FluxEngine.CreatePlayer` 创建播放器。
+初始化失败或未初始化就创建播放器都会抛出异常，不会自动启动或重试。
+宿主退出时先释放播放器，再调用 `FluxEngine.ShutdownAsync`。
 自定义 UI 使用 `Player.CanSeek` 显示交互能力；直播的 Seek 在核心层同样被拒绝。
 
 ## 示例与测试
@@ -82,7 +84,7 @@ await player.StopAsync();
 获取 Git LFS 文件后，可使用仓库根目录的 `Sample.mp4`，也可自行选择媒体文件。
 
 `tests` 保存核心回归用例和 Avalonia 消费项目。CI 仅手动触发，测试需显式启用；
-原生媒体测试还需要匹配的共享库和命令行工具。
+原生媒体测试需要匹配的共享库，外部流地址通过环境变量配置。
 生成输出和日志仍由 Git 忽略规则排除；`Sample.mp4` 和 FFmpeg 目录中的 DLL/EXE 通过 Git LFS 管理。
 
 ## 文档
@@ -92,7 +94,7 @@ await player.StopAsync();
 - [FFmpeg 部署与版本边界](docs/ffmpeg-deployment.md)
 - [日志](docs/logging.md)
 - [Seek 交互与权限](docs/seek-preview.md)
-- [原生库目录](FFmpeg/README.md) · [测试目录](tests/README.md)
+- [原生库目录](docs/ffmpeg-deployment.md) · [测试目录](tests/README.md)
 
 ## 许可证
 

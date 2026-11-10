@@ -2,7 +2,22 @@
 
 当前默认托管绑定为 FFmpeg.AutoGen 9.0.1.1。NuGet 包不分发 FFmpeg 原生库。
 应用使用 `FluxEngineOptions.FFmpegPath` 或 `FLUXMEDIA_FFMPEG_ROOT` 指定共享库目录。
-源码仓库通过 Git LFS 提供 Windows x64 原生库与命令行工具，执行 `git lfs pull` 后可在 `FFmpeg/win-x64/native` 找到；这不改变 NuGet 包的分发范围。
+源码仓库通过 Git LFS 提供 Windows x64 原生库，执行 `git lfs pull` 后可在 `FFmpeg/win-x64/native` 找到；这不改变 NuGet 包的分发范围。
+
+## 目录选择规则
+
+1. 检查 `FluxEngineOptions.FFmpegPath` 显式指定的完整库目录。
+2. 未指定、目录不存在或所需文件不完整时，检查 `FLUXMEDIA_FFMPEG_ROOT`。
+3. 两者都不可用时 `FluxEngine.Start` 直接抛出异常，错误包含配置目录与所需文件名。
+
+只保留这两个来源，不再支持附加目录、默认运行目录扫描或通配符找库。
+目录内必须包含当前平台和绑定所需的完整库集合，不从多个目录拼接依赖。
+开始加载后遇到错误直接抛出异常，不切换目录。当前进程加载过原生库后，更换目录需重启进程。
+
+Sample 先检查环境变量，未找到完整库时从程序目录向父目录查找 `FFmpeg/<RID>/native`，将找到的目录显式传入核心。
+这段仓库目录查找仅用于 Sample，原生库不复制到 bin 或发布目录。
+脱离源码仓库运行时，可用 `FLUXMEDIA_FFMPEG_ROOT` 指定独立部署的库目录。核心不识别 Sample 的目录布局。
+平台和架构选择与 FFmpeg 版本适配相互独立；只放入不同版本的文件不会自动获得跨 ABI 支持。
 
 ## 统一维护位置
 
@@ -44,7 +59,7 @@ macOS 使用 `lib{name}.{major}.dylib`。Unix 部署需要保留对应 ABI 名�
 跨主版本升级需检查结构布局、导出函数与调用约定，不能只替换 DLL 或修改绑定包版本。
 
 `FFmpegAutoGenVersion` 仅集中配置托管依赖版本，不代表所有绑定版本均可直接编译。
-测试源码的素材工具目录统一读取 FFmpegFactAttribute.NativeRoot，优先使用 FLUXMEDIA_FFMPEG_ROOT。
+测试源码的原生库目录统一读取 FFmpegFactAttribute.NativeRoot，优先使用 FLUXMEDIA_FFMPEG_ROOT。
 切换版本、原生目录或原生构建后应启动新进程；引擎 Shutdown 不卸载进程级原生函数绑定，不能用它热切换 ABI。
 
 不同 ABI 的库不能改名后直接使用。
@@ -52,8 +67,6 @@ macOS 使用 `lib{name}.{major}.dylib`。Unix 部署需要保留对应 ABI 名�
 
 ## 平台与分发
 
-使用同一构建的库和命令行工具；测试所需工具名称也由 FFmpegLibraries 提供。
-生产播放不要求 ffmpeg/ffprobe 命令行工具存在。
 Linux 音频还需要 OpenAL；macOS 使用系统 OpenAL Framework，相关平台仍需实机验证。
 
 原生库的 LGPL/GPL 与编解码配置由应用分发方选择，

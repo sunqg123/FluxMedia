@@ -66,27 +66,30 @@ public static class FluxEngine
     }
 
     /// <summary>
-    /// 初始化原生环境；重复启动沿用当前配置。
+    /// 显式初始化共享环境，失败直接抛出异常。
     /// </summary>
     public static void Start(FluxEngineOptions? options = null)
     {
         lock (SyncRoot)
         {
             if (_shutdownTask is not null) throw new InvalidOperationException("引擎正在关闭，请等待 ShutdownAsync 完成。");
-            if (_options is not null) return;
+            if (_options is not null)
+            {
+                if (options is not null && options != _options)
+                {
+                    throw new InvalidOperationException("引擎已经启动，不能在运行期间更换初始化配置。");
+                }
+                return;
+            }
             var actual = options ?? new FluxEngineOptions();
-            actual = actual with { FFmpegSearchPaths = actual.FFmpegSearchPaths.ToArray() };
             long? generation = null;
             try
             {
-                if (actual.EnableLogging && actual.LogLevel != LogLevel.None)
-                    generation = FluxMediaLog.ConfigureForEngine(new LoggingOptions
-                    {
-                        IsEnabled = true,
-                        Directory = actual.LogDirectory,
-                        MinimumLevel = actual.LogLevel
-                    });
-                FFmpegNativeRuntime.Initialize(actual.NativeOptions);
+                if (actual.EnableLogging)
+                {
+                    generation = FluxMediaLog.ConfigureForEngine(new LoggingOptions());
+                }
+                FFmpegNativeRuntime.Initialize(actual.FFmpegPath);
                 _logGeneration = generation;
                 _options = actual;
             }
@@ -99,14 +102,15 @@ public static class FluxEngine
     }
 
     /// <summary>
-    /// 创建独立播放器；配置和登记在同一次锁内完成。
+    /// 在已启动的引擎中创建播放器，未初始化时抛出异常。
     /// </summary>
     public static Player CreatePlayer(PlaybackOptions? options = null)
     {
         lock (SyncRoot)
         {
-            Start();
-            var actual = _options!.Merge(options);
+            if (_shutdownTask is not null) throw new InvalidOperationException("引擎正在关闭，不能创建播放器。");
+            if (_options is null) throw new InvalidOperationException("引擎尚未初始化，请先调用 FluxEngine.Start。");
+            var actual = options ?? new PlaybackOptions();
             var player = new Player(new PlaybackSession(actual));
             ActivePlayers.Add(player.InstanceId, player);
             return player;
@@ -177,7 +181,7 @@ public static class FluxEngine
 }
 
 /// <summary>
-/// 引擎的原生库、日志及默认超时配置。
+/// 引擎启动所需的库路径与日志开关。
 /// </summary>
 public sealed record FluxEngineOptions
 {
@@ -185,56 +189,9 @@ public sealed record FluxEngineOptions
     /// FFmpeg 共享库目录。
     /// </summary>
     public string? FFmpegPath { get; init; }
+
     /// <summary>
-    /// 附加原生库搜索目录。
-    /// </summary>
-    public IReadOnlyList<string> FFmpegSearchPaths { get; init; } = Array.Empty<string>();
-    /// <summary>
-    /// 缺少原生库时是否立即失败。
-    /// </summary>
-    public bool ThrowOnMissingFFmpeg { get; init; }
-    /// <summary>
-    /// 是否由引擎创建文件日志。
+    /// 是否开启默认文件日志。
     /// </summary>
     public bool EnableLogging { get; init; }
-    /// <summary>
-    /// 引擎日志目录。
-    /// </summary>
-    public string LogDirectory { get; init; } = "Logs";
-    /// <summary>
-    /// 引擎日志最低级别。
-    /// </summary>
-    public LogLevel LogLevel { get; init; } = LogLevel.Information;
-    /// <summary>
-    /// 默认媒体打开超时。
-    /// </summary>
-    public TimeSpan DefaultOpenTimeout { get; init; } = TimeSpan.FromSeconds(15);
-    /// <summary>
-    /// 转换为唯一的原生库配置模型。
-    /// </summary>
-    internal NativeLibraryOptions NativeOptions => new()
-    {
-        FFmpegRootDirectory = FFmpegPath,
-        AdditionalSearchDirectories = FFmpegSearchPaths,
-        ThrowOnMissingLibrary = ThrowOnMissingFFmpeg
-    };
-    /// <summary>
-    /// 合并引擎默认值和播放器显式参数，原生库配置仅在此合并一次。
-    /// </summary>
-    internal PlaybackOptions Merge(PlaybackOptions? options)
-    {
-        var explicitNative = options?.NativeLibraries ?? new NativeLibraryOptions();
-        var actual = options ?? new PlaybackOptions { OpenTimeout = this.DefaultOpenTimeout };
-        actual = actual with
-        {
-            NativeLibraries = new NativeLibraryOptions
-            {
-                FFmpegRootDirectory = string.IsNullOrWhiteSpace(explicitNative.FFmpegRootDirectory) ? this.FFmpegPath : explicitNative.FFmpegRootDirectory,
-                AdditionalSearchDirectories = this.FFmpegSearchPaths.Concat(explicitNative.AdditionalSearchDirectories).Where(static path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-                ThrowOnMissingLibrary = this.ThrowOnMissingFFmpeg || explicitNative.ThrowOnMissingLibrary
-            }
-        };
-
-        return actual;
-    }
 }

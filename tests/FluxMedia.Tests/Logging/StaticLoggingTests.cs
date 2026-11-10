@@ -200,13 +200,14 @@ public sealed class StaticLoggingTests : IDisposable
     /// <summary>
     /// 默认引擎启动不覆盖宿主独立配置的静态输出。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public void DefaultEngine_DoesNotOverwriteHostCallback()
     {
+        FluxEngine.Shutdown();
         var entries = new ConcurrentQueue<string>();
         FluxMediaLog.SetSink((_, _, message, _) => entries.Enqueue(message));
         FluxMediaLog.IsEnabled = true;
-        FluxEngine.Start();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot });
         FluxEngine.Shutdown();
         FluxMediaLog.Info("Host", "HostAfterShutdown");
         Assert.True(FluxMediaLog.IsEnabled);
@@ -216,10 +217,11 @@ public sealed class StaticLoggingTests : IDisposable
     /// <summary>
     /// 旧运行时关闭时，不释放宿主后来替换的新输出。
     /// </summary>
-    [Fact]
+    [FFmpegFact]
     public void OldRuntime_DoesNotShutdownReplacementTarget()
     {
-        FluxEngine.Start(new FluxEngineOptions { EnableLogging = true, LogDirectory = NewDirectory() });
+        FluxEngine.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = FFmpegFactAttribute.NativeRoot, EnableLogging = true });
         var entries = new ConcurrentQueue<string>();
         FluxMediaLog.SetSink((_, _, message, _) => entries.Enqueue(message));
         FluxEngine.Shutdown();

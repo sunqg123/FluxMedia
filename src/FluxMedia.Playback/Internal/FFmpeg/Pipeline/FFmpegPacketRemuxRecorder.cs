@@ -155,7 +155,7 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
     /// <summary>
     /// 初始化 FFmpeg 数据包重新封装录制器所需的状态和资源。
     /// </summary>
-    public FFmpegPacketRemuxRecorder(PlaybackRecordingOptions options, NativeLibraryOptions nativeLibraries, Guid instanceId, FFmpegStreamDescriptor? videoStream, FFmpegStreamDescriptor? audioStream)
+    public FFmpegPacketRemuxRecorder(PlaybackRecordingOptions options, Guid instanceId, FFmpegStreamDescriptor? videoStream, FFmpegStreamDescriptor? audioStream)
     {
         _options = options;
         _instanceId = instanceId;
@@ -168,7 +168,7 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
             SingleWriter = false,
             AllowSynchronousContinuations = false
         });
-        FFmpegNativeRuntime.EnsureInitialized(nativeLibraries);
+        FFmpegNativeRuntime.EnsureInitialized();
         _diagnostic = new PlaybackRecordingDiagnosticInfo
         {
             State = PlaybackRecordingState.Idle,

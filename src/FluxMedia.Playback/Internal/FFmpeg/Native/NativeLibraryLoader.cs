@@ -1,149 +1,79 @@
-using System.Runtime.InteropServices;
 using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Logging;
+using FluxMedia.Playback;
 
 namespace FluxMedia.FFmpeg.Native;
 
 /// <summary>
-/// 统一的 Native Library 加载器，负责搜索路径构建、加载和日志记录。
+/// 选择完整的配置目录，并从该目录加载原生库。
 /// </summary>
 internal sealed class NativeLibraryLoader
 {
     /// <summary>
-    /// 配置。
+    /// 显式指定的目录配置。
     /// </summary>
-    private readonly NativeLibraryOptions _options;
-
+    private readonly string? _explicitDirectory;
     /// <summary>
-    /// 实例标识。
+    /// 本次加载的日志标识。
     /// </summary>
     private readonly Guid _instanceId = Guid.NewGuid();
 
     /// <summary>
-    /// 初始化原生库加载器所需的状态和资源。
+    /// 保存显式目录配置。
     /// </summary>
-    public NativeLibraryLoader(NativeLibraryOptions? options = null)
+    public NativeLibraryLoader(string? explicitDirectory = null)
     {
-        _options = options ?? new NativeLibraryOptions();
+        _explicitDirectory = explicitDirectory;
     }
 
     /// <summary>
-    /// 根据配置、环境变量、运行目录和 RID 约定构建原生库搜索路径。
+    /// 显式目录优先，环境变量仅在目录不可用时兜底。
     /// </summary>
-    public IReadOnlyList<string> BuildSearchDirectories()
+    public string ResolveDirectory()
     {
-        var directories = new List<string>();
-        if (!string.IsNullOrWhiteSpace(_options.FFmpegRootDirectory))
-        {
-            directories.Add(_options.FFmpegRootDirectory);
-        }
-        var environmentRoot = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT");
-        if (!string.IsNullOrWhiteSpace(environmentRoot))
-        {
-            directories.Add(environmentRoot);
-        }
-        directories.AddRange(_options.AdditionalSearchDirectories.Where(static item => !string.IsNullOrWhiteSpace(item)));
-        directories.Add(AppContext.BaseDirectory);
-        var runtimeIdentifier = GetRuntimeIdentifier();
-        directories.Add(Path.Combine(AppContext.BaseDirectory, "runtimes", runtimeIdentifier, "native"));
-        directories.Add(Path.Combine(AppContext.BaseDirectory, "ffmpeg", runtimeIdentifier));
-        directories.Add(Path.Combine(AppContext.BaseDirectory, "FFmpeg", RuntimeInformation.ProcessArchitecture == Architecture.X64 ? "x64" : RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()));
-
-        return directories
-            .Where(static directory => !string.IsNullOrWhiteSpace(directory))
-            .Distinct(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
-            .ToArray();
+        var explicitRoot = ResolveConfiguredDirectory(_explicitDirectory, "Explicit");
+        if (explicitRoot is not null) return explicitRoot;
+        var environment = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT");
+        var environmentRoot = ResolveConfiguredDirectory(environment, "Environment");
+        if (environmentRoot is not null) return environmentRoot;
+        throw new DirectoryNotFoundException(
+            $"未找到与 FFmpeg.AutoGen {FFmpegLibraries.BindingVersion} 匹配的完整库目录。" +
+            $"显式目录：{_explicitDirectory ?? "未配置"}；FLUXMEDIA_FFMPEG_ROOT：{environment ?? "未配置"}。" +
+            $"需要：{string.Join(", ", FFmpegLibraries.RequiredFileNames)}。");
     }
 
     /// <summary>
-    /// 在指定目录或候选目录中加载原生库。
+    /// 检查完整库集合，不加载原生代码。
     /// </summary>
-    public NativeLibraryLoadResult TryLoad(NativeLibraryDescriptor descriptor, string? directory = null)
+    private string? ResolveConfiguredDirectory(string? directory, string source)
     {
-        Exception? lastError = null;
-        string? lastCandidate = null;
-        IReadOnlyList<string> directories = directory is null ? BuildSearchDirectories() : new[] { directory };
-        foreach (var searchDirectory in directories)
+        if (string.IsNullOrWhiteSpace(directory)) return null;
+        if (!FFmpegLibraries.IsAvailable(directory))
         {
-            foreach (var candidate in EnumerateCandidates(searchDirectory, descriptor.FileNames))
-            {
-                lastCandidate = candidate;
-                FluxMediaLog.Write(LogLevel.Debug, nameof(NativeLibraryLoader), _instanceId, $"Event=NativeLibrarySearch Path={candidate}");
-                try
-                {
-                    NativeLibraryCompat.Load(candidate);
-                    FluxMediaLog.Write(LogLevel.Information, nameof(NativeLibraryLoader), _instanceId, $"Event=NativeLibraryLoaded Path={candidate}");
-                    return new NativeLibraryLoadResult(descriptor, candidate, true);
-                }
-                catch (Exception ex)
-                {
-                    lastError = ex;
-                    FluxMediaLog.Write(LogLevel.Error, nameof(NativeLibraryLoader), _instanceId, $"Event=NativeLibraryLoadFailed Path={candidate}", ex);
-                }
-            }
+            FluxMediaLog.Write(LogLevel.Warning, nameof(NativeLibraryLoader), _instanceId,
+                $"Event=FFmpegDirectoryRejected Source={source} Directory={directory} Reason=MissingOrIncomplete");
+            return null;
         }
-
-        if (lastError is not null)
-        {
-            if (_options.ThrowOnMissingLibrary)
-            {
-                throw new InvalidOperationException($"所有候选路径均无法加载 {descriptor.LogicalName}。", lastError);
-            }
-            return new NativeLibraryLoadResult(descriptor, lastCandidate, false, lastError);
-        }
-
-        var searchText = string.Join(Path.PathSeparator.ToString(), directories);
-        if (_options.ThrowOnMissingLibrary)
-        {
-            throw new FileNotFoundException($"未找到原生库 {descriptor.LogicalName}。已搜索路径：{searchText}");
-        }
-        return new NativeLibraryLoadResult(descriptor, null, false, new FileNotFoundException($"未找到原生库 {descriptor.LogicalName}。已搜索路径：{searchText}"));
+        return Path.GetFullPath(directory);
     }
 
     /// <summary>
-    /// 枚举当前平台可能使用的原生库路径。
+    /// 仅加载选定目录中的准确文件，不扫描或切换目录。
     /// </summary>
-    private static IEnumerable<string> EnumerateCandidates(string directory, IReadOnlyList<string> fileNames)
+    public void Load(NativeLibraryDescriptor descriptor, string directory)
     {
-        if (!Directory.Exists(directory))
+        var path = Path.Combine(directory, descriptor.FileName);
+        try
         {
-            yield break;
+            NativeLibraryCompat.Load(path);
+            FluxMediaLog.Write(LogLevel.Information, nameof(NativeLibraryLoader), _instanceId,
+                $"Event=NativeLibraryLoaded Path={path}");
         }
-
-        foreach (var fileName in fileNames)
+        catch (Exception exception)
         {
-            if (fileName.IndexOf('*') >= 0)
-            {
-                foreach (var file in Directory.EnumerateFiles(directory, fileName))
-                {
-                    yield return file;
-                }
-            }
-            else
-            {
-                var path = Path.Combine(directory, fileName);
-                if (File.Exists(path))
-                {
-                    yield return path;
-                }
-            }
+            FluxMediaLog.Write(LogLevel.Error, nameof(NativeLibraryLoader), _instanceId,
+                $"Event=NativeLibraryLoadFailed Path={path}", exception);
+            throw new InvalidOperationException($"无法加载原生库 {descriptor.LogicalName}：{path}。请检查平台、进程架构和依赖。", exception);
         }
-    }
-
-    /// <summary>
-    /// 获取当前平台和架构对应的运行时标识。
-    /// </summary>
-    private static string GetRuntimeIdentifier()
-    {
-        var os = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win" : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "osx" : "linux";
-        var architecture = RuntimeInformation.ProcessArchitecture switch
-        {
-            Architecture.X64 => "x64",
-            Architecture.X86 => "x86",
-            Architecture.Arm64 => "arm64",
-            Architecture.Arm => "arm",
-            _ => RuntimeInformation.ProcessArchitecture.ToString().ToLowerInvariant()
-        };
-        return $"{os}-{architecture}";
     }
 }

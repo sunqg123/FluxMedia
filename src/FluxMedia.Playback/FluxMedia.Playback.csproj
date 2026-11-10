@@ -13,13 +13,18 @@
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <DebugType>None</DebugType>
-    <DebugSymbols>false</DebugSymbols>
+    <DebugType Condition="'$(Configuration)' != 'Debug'">none</DebugType>
+    <DebugSymbols Condition="'$(Configuration)' != 'Debug'">false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <PackageReleaseNotes>FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI. Architecture refactor: one FluxEngine player entry point, isolated playback pipeline ownership, unified seek and recording control, static logging, and removal of legacy Runtime and compatibility factories. Existing callers must migrate to FluxEngine.CreatePlayer.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+    <DebugType>portable</DebugType>
+    <DebugSymbols>true</DebugSymbols>
+    <Optimize>false</Optimize>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="\" />

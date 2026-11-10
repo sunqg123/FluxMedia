@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using FluxMedia.Playback;
 
 namespace FluxMedia.Tests;
@@ -16,7 +17,7 @@ public sealed class FFmpegFactAttribute : FactAttribute
         {
             var configured = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT");
             return !string.IsNullOrWhiteSpace(configured) ? Path.GetFullPath(configured) : Path.GetFullPath(Path.Combine(
-                AppContext.BaseDirectory, "..", "..", "..", "..", "..", "FFmpeg", "win-x64", "native"));
+                AppContext.BaseDirectory, "..", "..", "..", "..", "..", "FFmpeg", RuntimeInformation.RuntimeIdentifier, "native"));
         }
     }
 
@@ -25,11 +26,9 @@ public sealed class FFmpegFactAttribute : FactAttribute
     /// </summary>
     public FFmpegFactAttribute()
     {
-        if (!FFmpegLibraries.IsAvailable(NativeRoot) ||
-            !File.Exists(Path.Combine(NativeRoot, FFmpegLibraries.FFmpegExecutableName)) ||
-            !File.Exists(Path.Combine(NativeRoot, FFmpegLibraries.FFprobeExecutableName)))
+        if (!FFmpegLibraries.IsAvailable(NativeRoot))
         {
-            Skip = $"需要与当前 FFmpeg.AutoGen 绑定匹配的共享库及命令行工具：{string.Join(", ", FFmpegLibraries.RequiredFileNames)}。";
+            Skip = $"需要与当前 FFmpeg.AutoGen 绑定匹配的共享库：{string.Join(", ", FFmpegLibraries.RequiredFileNames)}。";
         }
     }
 }

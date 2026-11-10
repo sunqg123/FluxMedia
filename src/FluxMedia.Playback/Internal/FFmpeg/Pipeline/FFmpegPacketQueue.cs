@@ -90,9 +90,7 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         int capacity, AVRational timeBase = default, TimeSpan? fallbackPacketDuration = null, bool requireKeyFrameAfterOverflow = false)
     {
         _requireKeyFrameAfterOverflow = requireKeyFrameAfterOverflow;
-        _timeBase = timeBase.num == 0 || timeBase.den == 0
-            ? new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE }
-            : timeBase;
+        _timeBase = timeBase.num == 0 || timeBase.den == 0 ? new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE } : timeBase;
         _fallbackPacketDuration = fallbackPacketDuration ?? TimeSpan.FromMilliseconds(33);
         _channel = Channel.CreateBounded<FFmpegPacketLease>(new BoundedChannelOptions(Math.Max(1, capacity))
         {
@@ -187,9 +185,7 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
     {
         lock (_sync)
         {
-            _timeBase = timeBase.num == 0 || timeBase.den == 0
-                ? new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE }
-                : timeBase;
+            _timeBase = timeBase.num == 0 || timeBase.den == 0 ? new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE } : timeBase;
             if (fallbackPacketDuration is not null)
             {
                 _fallbackPacketDuration = fallbackPacketDuration.Value;
@@ -206,14 +202,12 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         lock (_sync)
         {
             ThrowIfDisposed();
-
             if (_completed)
             {
                 packet.Dispose();
                 Interlocked.Increment(ref _droppedPackets);
                 return false;
             }
-
             var keyPacket = (packet.Packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
             if (_requireKeyFrameAfterOverflow)
             {
@@ -233,13 +227,11 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
                 }
                 _waitingForKeyPacket = false;
             }
-
             if (_channel.Writer.TryWrite(packet))
             {
                 OnPacketEnqueued(packet);
                 return true;
             }
-
             if (_requireKeyFrameAfterOverflow)
             {
                 DropBufferedPackets();
@@ -253,7 +245,6 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
                 Interlocked.Increment(ref _droppedPackets);
                 return false;
             }
-
             if (_channel.Reader.TryRead(out var stale))
             {
                 OnPacketDequeued(stale);
@@ -265,7 +256,6 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
                     return true;
                 }
             }
-
             packet.Dispose();
             Interlocked.Increment(ref _droppedPackets);
             return false;
@@ -350,14 +340,12 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         lock (_sync)
         {
             if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
-
             _completed = true;
             _channel.Writer.TryComplete();
             while (_channel.Reader.TryRead(out var packet))
             {
                 packet.Dispose();
             }
-
             ResetTimestamps();
         }
     }
@@ -381,9 +369,7 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
             _lastTimestamp = timestamp.Value;
             _firstTimestamp ??= timestamp.Value;
             _currentTime = _firstTimestamp.Value;
-            _bufferedDuration = _lastTimestamp.Value >= _firstTimestamp.Value
-                ? _lastTimestamp.Value - _firstTimestamp.Value
-                : _fallbackPacketDuration * Math.Max(1, Count);
+            _bufferedDuration = _lastTimestamp.Value >= _firstTimestamp.Value ? _lastTimestamp.Value - _firstTimestamp.Value : _fallbackPacketDuration * Math.Max(1, Count);
         }
     }
 

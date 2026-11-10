@@ -42,6 +42,7 @@ public sealed unsafe class FFmpegPacketQueueTests
     [FFmpegFact]
     public void PacketQueue_TracksBufferedTimeAndCurrentTime()
     {
+        FluxEngine.Shutdown();
         if (!TryInitializeFFmpeg())
         {
             return;
@@ -82,8 +83,8 @@ public sealed unsafe class FFmpegPacketQueueTests
             return false;
         }
 
-        FFmpegNativeRuntime.EnsureInitialized(
-            new NativeLibraryOptions { FFmpegRootDirectory = ffmpegRoot });
+        FluxEngine.Shutdown();
+        FluxEngine.Start(new FluxEngineOptions { FFmpegPath = ffmpegRoot });
         return true;
     }
 

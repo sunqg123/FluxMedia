@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
@@ -29,8 +30,7 @@ public sealed partial class App : Application
             FluxEngine.Start(new FluxEngineOptions
             {
                 FFmpegPath = ffmpegRoot,
-                EnableLogging = true,
-                LogDirectory = Path.Combine(AppContext.BaseDirectory, "Logs")
+                EnableLogging = true
             });
             desktop.Exit += (_, _) => FluxEngine.Shutdown();
             desktop.MainWindow = new MainWindow();
@@ -53,7 +53,7 @@ public sealed partial class App : Application
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, "FFmpeg", "win-x64", "native");
+            var candidate = Path.Combine(directory.FullName, "FFmpeg", RuntimeInformation.RuntimeIdentifier, "native");
             if (FFmpegLibraries.IsAvailable(candidate))
             {
                 return candidate;
