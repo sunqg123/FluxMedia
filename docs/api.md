@@ -29,6 +29,21 @@ await player.StopAsync();
 直播返回 NotSeekable，绑定赋值也不会修改核心播放位置。
 未知时长的网络源保守禁止 Seek，特殊流需根据元数据与日志进一步确认。
 
+## 倍速播放
+
+点播支持 0.5～2 倍速，可绑定 `Player.Speed` 或调用 `SetSpeedAsync`。
+`Player.SupportedSpeeds` 提供常用档位，`Player.CanChangeSpeed` 用于控制 UI。
+
+```csharp
+if (player.CanChangeSpeed)
+    await player.SetSpeedAsync(1.5);
+```
+
+音频通过 atempo 保持音调，视频跟随实际音频时钟；无可用音频设备时按媒体时间戳调度。
+直播与未知时长媒体由核心拒绝变速，返回 `PlaybackRateNotSupported`，时序模式不能绕过权限。
+打开新媒体按 `PlaybackOptions.InitialPlaybackRate` 初始化，直播固定为 1 倍速。
+倍速只影响播放，录制保留源媒体的时间戳与时长。
+
 ## 视频帧
 
 ```csharp

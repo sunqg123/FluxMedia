@@ -1,3 +1,4 @@
+using FluxMedia.Playback.Internal;
 using FluxMedia.Core.Errors;
 using FluxMedia.Core.Models;
 using FluxMedia.Core.Logging;
@@ -199,6 +200,16 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public string TimeText => $"{PositionText} / {DurationText}";
 
     /// <summary>
+    /// 当前媒体是否允许调整倍速。
+    /// </summary>
+    public bool CanChangeSpeed => !_disposed && _session.CanChangeSpeed;
+
+    /// <summary>
+    /// 界面常用倍速，允许设置范围内的自定义值。
+    /// </summary>
+    public static IReadOnlyList<double> SupportedSpeeds => PlaybackRatePolicy.Presets;
+
+    /// <summary>
     /// 供界面绑定的播放速度。
     /// </summary>
     public double Speed
@@ -206,11 +217,18 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         get => _speed;
         set
         {
-            var normalized = Math.Max(0.25, Math.Min(4, value));
-            if (Math.Abs(normalized - _speed) < 0.0001) return;
-            _speed = normalized;
-            RaiseProperties(nameof(Speed));
-            _ = SetSpeedFromBindingAsync(normalized);
+            if (!CanChangeSpeed)
+            {
+                RaiseProperties(nameof(Speed));
+                return;
+            }
+            if (value == _speed) return;
+            if (PlaybackRatePolicy.IsSupported(value))
+            {
+                _speed = value;
+                RaiseProperties(nameof(Speed));
+            }
+            _ = SetSpeedFromBindingAsync(value);
         }
     }
 
@@ -652,8 +670,9 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     {
         DispatchNotification(() =>
         {
+            _speed = _session.PlaybackRate;
             NotifySubscribers(StateChanged, state, nameof(StateChanged));
-            RaisePropertiesCore(nameof(State), nameof(IsPlaying), nameof(IsSeeking), nameof(CanSeek), nameof(IsLive));
+            RaisePropertiesCore(nameof(State), nameof(IsPlaying), nameof(IsSeeking), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive));
         });
     }
 
@@ -757,10 +776,11 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// </summary>
     private void RefreshPositionFromSession()
     {
+        _speed = _session.PlaybackRate;
         _positionSeconds = _session.CurrentTime.TotalSeconds;
         _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
         RaiseProperties(
-            nameof(CanSeek), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
+            nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
     }
 
     /// <summary>
@@ -773,10 +793,11 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// </summary>
     private void RefreshMediaProperties()
     {
+        _speed = _session.PlaybackRate;
         _positionSeconds = _session.CurrentTime.TotalSeconds;
         _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
         RaiseProperties(
-            nameof(Source), nameof(CanSeek), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
+            nameof(Source), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
     }
 
     /// <summary>

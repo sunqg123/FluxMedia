@@ -282,7 +282,12 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     /// <summary>
     /// 播放速度。
     /// </summary>
-    public double PlaybackRate => _playbackRate;
+    public double PlaybackRate => Volatile.Read(ref _playbackRate);
+
+    /// <summary>
+    /// 已确认的点播媒体允许倍速。
+    /// </summary>
+    public bool CanChangeSpeed => CanSeek;
 
     /// <summary>
     /// 音量。
@@ -377,7 +382,6 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
             _videoFrames.ResetCounters();
             _videoFrames.ResetPublicOutput();
 
-
             _retiredReadTimeouts = 0;
             _lastNetworkPacketAt = null;
             try
@@ -389,6 +393,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
                 await pipeline.PrepareAsync(open.Token).ConfigureAwait(false);
                 CurrentMediaInfo = pipeline.Demuxer.MediaInfo ?? throw new InvalidOperationException("未读取到媒体信息。");
                 if (!CurrentMediaInfo.HasVideo) throw new InvalidOperationException("当前媒体没有视频流。");
+                Volatile.Write(ref _playbackRate, CanSeekCurrentSource() ? NormalizePlaybackRate(_currentOptions.InitialPlaybackRate) : 1.0);
                 if (pipeline.Demuxer.OpenDiagnostic is not null) UpdateOpenDiagnostics(pipeline.Demuxer.OpenDiagnostic);
                 await TransitionAsync(PlaybackState.Ready, cancellationToken).ConfigureAwait(false);
                 MarkLifecycle("OpenCompleted");
@@ -742,25 +747,28 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     /// <summary>
     /// 设置播放速度。
     /// </summary>
-    public ValueTask<PlaybackResult> SetPlaybackRateAsync(double rate, CancellationToken cancellationToken = default)
+    public async ValueTask<PlaybackResult> SetPlaybackRateAsync(double rate, CancellationToken cancellationToken = default)
     {
-        EnsureOpened();
-        cancellationToken.ThrowIfCancellationRequested();
-        if (!IsSupportedRate(rate))
+        await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            return new ValueTask<PlaybackResult>(ControlFailure(PlaybackError.PlaybackRateNotSupported, "当前只支持 0.5x、1.0x、1.5x、2.0x。"));
+            EnsureOpened();
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!PlaybackRatePolicy.IsSupported(rate))
+                return ControlFailure(PlaybackError.PlaybackRateNotSupported, "播放速度必须为 0.5 到 2 之间的有限值。");
+            if (!CanChangeSpeed)
+            {
+                FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId,
+                    $"Event=PlaybackRateRejected Rate={rate} IsLive={IsLive} State={State}");
+                return ControlFailure(PlaybackError.PlaybackRateNotSupported, "直播或未知时长媒体不支持倍速播放。");
+            }
+            Volatile.Write(ref _playbackRate, rate);
+            _lastControlOperation = "SetPlaybackRate";
+            _lastControlError = null;
+            FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=PlaybackRateChanged Rate={rate:0.###} State={State}");
+            return PlaybackResult.Success();
         }
-
-        if (!CanUsePresentationControls())
-        {
-            return new ValueTask<PlaybackResult>(ControlFailure(PlaybackError.PlaybackRateNotSupported, "实时流当前不支持倍速播放。"));
-        }
-
-        _playbackRate = rate;
-        _lastControlOperation = "SetPlaybackRate";
-        _lastControlError = null;
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=SetPlaybackRate Rate={rate:0.###} State={State} SourceKind={CurrentSource?.Kind} Source={CurrentSource?.Uri}");
-        return new ValueTask<PlaybackResult>(PlaybackResult.Success());
+        finally { _pipelineMutationGate.Release(); }
     }
 
     /// <summary>
@@ -1510,16 +1518,6 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     }
 
     /// <summary>
-    /// 判断当前媒体是否允许速度和跳转控制。
-    /// </summary>
-    private bool CanUsePresentationControls()
-    {
-        if (CurrentSource is null || CurrentMediaInfo is null) return false;
-        var timingMode = PlaybackTimingPolicy.Resolve(CurrentSource, _currentOptions, CurrentMediaInfo.Duration);
-        return timingMode == PlaybackTimingMode.PresentationTimestamp;
-    }
-
-    /// <summary>
     /// 将跳转目标限制在有效媒体范围内。
     /// </summary>
     private TimeSpan ClampPosition(TimeSpan position)
@@ -1548,22 +1546,11 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     }
 
     /// <summary>
-    /// 检查播放速度是否在支持范围内。
-    /// </summary>
-    private static bool IsSupportedRate(double rate)
-    {
-        return Math.Abs(rate - 0.5) < 0.001 ||
-            Math.Abs(rate - 1.0) < 0.001 ||
-            Math.Abs(rate - 1.5) < 0.001 ||
-            Math.Abs(rate - 2.0) < 0.001;
-    }
-
-    /// <summary>
     /// 将无效播放速度转换为有效值。
     /// </summary>
     private static double NormalizePlaybackRate(double rate)
     {
-        return IsSupportedRate(rate) ? rate : 1.0;
+        return PlaybackRatePolicy.IsSupported(rate) ? rate : 1.0;
     }
 
     /// <summary>
@@ -1597,7 +1584,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     private PlaybackPipeline CreatePipeline(TimeSpan position)
     {
         PlaybackPipeline? pipeline = null;
-        var callbacks = new PlaybackPipelineCallbacks(() => _isPaused, () => _playbackRate, () => _volume, () => _isMuted,
+        var callbacks = new PlaybackPipelineCallbacks(() => _isPaused, () => PlaybackRate, () => _volume, () => _isMuted,
             _resyncSignal.Snapshot, () => Volatile.Read(ref _videoOutputCapabilities),
             diagnostic => { if (ReferenceEquals(_pipeline, pipeline)) UpdateWorkerDiagnostics(diagnostic); },
             diagnostic => { if (ReferenceEquals(_pipeline, pipeline)) UpdateAudioDiagnostics(diagnostic); },

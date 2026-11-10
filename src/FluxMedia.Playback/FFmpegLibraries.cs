@@ -24,7 +24,8 @@ public static class FFmpegLibraries
         ("swresample", ffmpeg.LIBSWRESAMPLE_VERSION_MAJOR),
         ("swscale", ffmpeg.LIBSWSCALE_VERSION_MAJOR),
         ("avcodec", ffmpeg.LIBAVCODEC_VERSION_MAJOR),
-        ("avformat", ffmpeg.LIBAVFORMAT_VERSION_MAJOR)
+        ("avformat", ffmpeg.LIBAVFORMAT_VERSION_MAJOR),
+        ("avfilter", ffmpeg.LIBAVFILTER_VERSION_MAJOR)
     };
 
     /// <summary>
@@ -73,6 +74,7 @@ public static class FFmpegLibraries
         RequireVersion("swscale", ffmpeg.swscale_version());
         RequireVersion("avcodec", ffmpeg.avcodec_version());
         RequireVersion("avformat", ffmpeg.avformat_version());
+        RequireVersion("avfilter", ffmpeg.avfilter_version());
     }
 
     /// <summary>

@@ -55,6 +55,16 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     private readonly Func<bool> _isPaused;
 
     /// <summary>
+    /// 读取核心确认后的播放倍速。
+    /// </summary>
+    private readonly Func<double> _playbackRate;
+
+    /// <summary>
+    /// 当前管线的音频时间映射。
+    /// </summary>
+    private readonly AudioPlaybackTimeline _timeline = new();
+
+    /// <summary>
     /// 当前音量，范围为 0 到 1。
     /// </summary>
     private readonly Func<double> _volume;
@@ -93,7 +103,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     /// 初始化 FFmpeg 数据包音频播放工作线程所需的状态和资源。
     /// </summary>
     public FFmpegPacketAudioPlaybackWorker(
-        MediaSource source, Guid instanceId, TimeSpan startPosition, FFmpegStreamDescriptor stream, ChannelReader<FFmpegPacketLease> packets, Func<long> packetGeneration, IAudioOutputDevice output, Func<bool> isPaused, Func<double> volume, Func<bool> isMuted, Action<AudioPlaybackDiagnostics>? onDiagnostics = null, Func<PlaybackResyncRequest>? resyncRequest = null, FFmpegPacketConsumer? recordingPacketConsumer = null)
+        MediaSource source, Guid instanceId, TimeSpan startPosition, FFmpegStreamDescriptor stream, ChannelReader<FFmpegPacketLease> packets, Func<long> packetGeneration, IAudioOutputDevice output, Func<bool> isPaused, Func<double> volume, Func<bool> isMuted, Action<AudioPlaybackDiagnostics>? onDiagnostics = null, Func<PlaybackResyncRequest>? resyncRequest = null, FFmpegPacketConsumer? recordingPacketConsumer = null, Func<double>? playbackRate = null)
     {
         _source = source;
         _instanceId = instanceId;
@@ -103,6 +113,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
         _packetGeneration = packetGeneration;
         _output = output;
         _isPaused = isPaused;
+        _playbackRate = playbackRate ?? (() => 1.0);
         _volume = volume;
         _isMuted = isMuted;
         _resyncRequest = resyncRequest ?? (() => default);
@@ -140,9 +151,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
 
         AVCodecContext* codecContext = null;
         AVFrame* frame = null;
-        SwrContext* swr = null;
-        byte* outBuffer = null;
-        AVChannelLayout outLayout = default;
+        FFmpegAudioTempo? tempo = null;
 
         try
         {
@@ -165,10 +174,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             outputChannels = codecContext->ch_layout.nb_channels > 0 ? Math.Min((int)codecContext->ch_layout.nb_channels, 2) : 2;
             outputFormat = $"s16/{sampleRate}Hz/{outputChannels}ch";
 
-            ffmpeg.av_channel_layout_default(&outLayout, outputChannels);
-            FFmpegErrorHelper.ThrowIfError(
-                ffmpeg.swr_alloc_set_opts2(&swr, &outLayout, AVSampleFormat.AV_SAMPLE_FMT_S16, sampleRate, &codecContext->ch_layout, codecContext->sample_fmt, codecContext->sample_rate, 0, null), "swr_alloc_set_opts2");
-            FFmpegErrorHelper.ThrowIfError(ffmpeg.swr_init(swr), "swr_init");
+            tempo = new FFmpegAudioTempo(codecContext, sampleRate, outputChannels, _playbackRate());
 
             _output.Initialize(sampleRate, outputChannels);
             _output.SetVolume(_volume(), _isMuted());
@@ -182,24 +188,50 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
                 throw new InvalidOperationException("FFmpeg audio frame allocation failed.");
             }
 
-            var lastStatsAt = DateTimeOffset.UtcNow;
             var wasPaused = false;
             var initialResync = _resyncRequest();
             var lastResyncVersion = initialResync.Version;
             var initialPosition = initialResync.Version > 0 ? initialResync.Position : _startPosition;
             currentTime = initialPosition;
             TimeSpan? prerollDropUntil = initialPosition > TimeSpan.Zero ? initialPosition : null;
-            var outData = stackalloc byte*[1];
+            TempoPcmConsumer consume = (ReadOnlySpan<byte> pcm, int samples, double rate) =>
+            {
+                if (_disposed || cancellationToken.IsCancellationRequested || _resyncRequest().Version != lastResyncVersion) return;
+                // 控制预写量，让变速及时生效，并持续响应暂停和 Seek。
+                while (_output.IsAvailable && (_isPaused() || _output.GetBufferedDuration() > TimeSpan.FromMilliseconds(150)))
+                {
+                    if (_disposed || cancellationToken.IsCancellationRequested || _resyncRequest().Version != lastResyncVersion) return;
+                    var paused = _isPaused();
+                    if (paused != wasPaused)
+                    {
+                        wasPaused = paused;
+                        if (paused) _output.Pause();
+                        else _output.Play();
+                    }
+                    Report(sampleRate, outputChannels, outputFormat, paused ? "Paused" : "Running", decodedFrames, writtenBytes, currentTime, null);
+                    Thread.Sleep(10);
+                }
+                if (_disposed || cancellationToken.IsCancellationRequested || _resyncRequest().Version != lastResyncVersion) return;
+                if (wasPaused && !_isPaused())
+                {
+                    wasPaused = false;
+                    _output.Play();
+                }
+                _output.Write(pcm);
+                _timeline.Append(samples / (double)sampleRate, rate);
+                writtenBytes += pcm.Length;
+                Report(sampleRate, outputChannels, outputFormat, "Running", decodedFrames, writtenBytes, currentTime, null);
+            };
             foreach (var packetLease in FFmpegPacketReader.ReadWithDrain(_packets, () => _disposed, cancellationToken))
             {
                 using (packetLease)
                 {
                     ApplyResyncIfNeeded(
-                        codecContext, frame, swr, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
+                        codecContext, frame, ref tempo, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
                     while (!_disposed && _isPaused() && !cancellationToken.IsCancellationRequested)
                     {
                         ApplyResyncIfNeeded(
-                            codecContext, frame, swr, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
+                            codecContext, frame, ref tempo, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
                         if (!wasPaused)
                         {
                             wasPaused = true;
@@ -233,7 +265,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
                     FFmpegErrorHelper.ThrowIfError(ffmpeg.avcodec_send_packet(codecContext, packetLease is null ? null : packetLease.Packet), "avcodec_send_packet");
                     while (!_disposed && !cancellationToken.IsCancellationRequested)
                     {
-                        if (ApplyResyncIfNeeded(codecContext, frame, swr, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil))
+                        if (ApplyResyncIfNeeded(codecContext, frame, ref tempo, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil))
                         {
                             break;
                         }
@@ -255,53 +287,17 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
                             continue;
                         }
 
-                        var outSamples = (int)ffmpeg.av_rescale_rnd(ffmpeg.swr_get_delay(swr, codecContext->sample_rate) + frame->nb_samples, sampleRate, codecContext->sample_rate, AVRounding.AV_ROUND_UP);
-                        var outBufferSize = ffmpeg.av_samples_get_buffer_size(null, outputChannels, outSamples, AVSampleFormat.AV_SAMPLE_FMT_S16, 1);
-                        if (outBufferSize <= 0)
-                        {
-                            continue;
-                        }
-
-                        outBuffer = (byte*)ffmpeg.av_realloc(outBuffer, (ulong)outBufferSize);
-                        if (outBuffer == null)
-                        {
-                            throw new InvalidOperationException("FFmpeg audio conversion buffer allocation failed.");
-                        }
-
-                        outData[0] = outBuffer;
-                        var converted = ffmpeg.swr_convert(swr, outData, outSamples, frame->extended_data, frame->nb_samples);
-                        FFmpegErrorHelper.ThrowIfError(converted, "swr_convert");
-                        var bytes = ffmpeg.av_samples_get_buffer_size(null, outputChannels, converted, AVSampleFormat.AV_SAMPLE_FMT_S16, 1);
-                        if (bytes > 0)
-                        {
-                            _output.Write(new ReadOnlySpan<byte>(outBuffer, bytes));
-                            writtenBytes += bytes;
-                            decodedFrames++;
-                        }
-
-                        if (DateTimeOffset.UtcNow - lastStatsAt >= TimeSpan.FromSeconds(1))
-                        {
-                            lastStatsAt = DateTimeOffset.UtcNow;
-                            Report(sampleRate, outputChannels, outputFormat, "Running", decodedFrames, writtenBytes, currentTime, null);
-                        }
+                        _timeline.Start(currentTime, _playbackRate());
+                        tempo!.Push(frame, _playbackRate(), consume);
+                        decodedFrames++;
+                        ffmpeg.av_frame_unref(frame);
                     }
                 }
             }
 
-            // 排空重采样器，保留末尾不足一帧的采样。
-            while (!_disposed && !cancellationToken.IsCancellationRequested)
-            {
-                const int tailSamples = 4096;
-                outBuffer = (byte*)ffmpeg.av_realloc(outBuffer, (ulong)(tailSamples * outputChannels * sizeof(short)));
-                if (outBuffer == null) throw new InvalidOperationException("FFmpeg audio conversion buffer allocation failed.");
-                outData[0] = outBuffer;
-                var converted = ffmpeg.swr_convert(swr, outData, tailSamples, null, 0);
-                FFmpegErrorHelper.ThrowIfError(converted, "swr_convert drain");
-                if (converted == 0) break;
-                var bytes = converted * outputChannels * sizeof(short);
-                _output.Write(new ReadOnlySpan<byte>(outBuffer, bytes));
-                writtenBytes += bytes;
-            }
+            // 排空变速滤镜，保留末尾采样。
+            if (!_disposed && !cancellationToken.IsCancellationRequested)
+                tempo!.Complete(consume);
 
             // 等待尾音播放完；暂停和停止仍可中断等待。
             while (!_disposed && !cancellationToken.IsCancellationRequested && _output.IsAvailable &&
@@ -314,6 +310,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
                     if (paused) _output.Pause();
                     else _output.Play();
                 }
+                Report(sampleRate, outputChannels, outputFormat, paused ? "Paused" : "Running", decodedFrames, writtenBytes, currentTime, null);
                 Thread.Sleep(10);
             }
         }
@@ -331,11 +328,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
         finally
         {
             _output.Stop();
-            if (outBuffer != null)
-                ffmpeg.av_free(outBuffer);
-            if (swr != null)
-                ffmpeg.swr_free(&swr);
-            ffmpeg.av_channel_layout_uninit(&outLayout);
+            tempo?.Dispose();
             if (frame != null)
                 ffmpeg.av_frame_free(&frame);
             if (codecContext != null)
@@ -349,7 +342,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     /// 发现新的同步请求时重置解码状态。
     /// </summary>
     private bool ApplyResyncIfNeeded(
-        AVCodecContext* codecContext, AVFrame* frame, SwrContext* swr, int sampleRate, int channels, string outputFormat, long decodedFrames, long writtenBytes, ref TimeSpan currentTime, ref long lastResyncVersion, ref TimeSpan? prerollDropUntil)
+        AVCodecContext* codecContext, AVFrame* frame, ref FFmpegAudioTempo? tempo, int sampleRate, int channels, string outputFormat, long decodedFrames, long writtenBytes, ref TimeSpan currentTime, ref long lastResyncVersion, ref TimeSpan? prerollDropUntil)
     {
         var request = _resyncRequest();
         if (request.Version == lastResyncVersion)
@@ -364,11 +357,9 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             ffmpeg.av_frame_unref(frame);
         }
 
-        if (swr != null)
-        {
-            ffmpeg.swr_init(swr);
-        }
-
+        tempo?.Dispose();
+        tempo = new FFmpegAudioTempo(codecContext, sampleRate, channels, _playbackRate());
+        _timeline.Reset();
         _output.Clear();
         currentTime = request.Position;
         prerollDropUntil = request.Position;
@@ -408,6 +399,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     private void Report(int sampleRate, int channels, string outputFormat, string state, long decodedFrames, long writtenBytes, TimeSpan currentTime, string? error)
     {
         var outputDiagnostic = _output.GetDiagnosticInfo();
+        var presentationTime = _timeline.GetPosition(outputDiagnostic.BufferedDuration + outputDiagnostic.DeviceDelay, out var rate);
         _onDiagnostics?.Invoke(new AudioPlaybackDiagnostics
         {
             StreamIndex = _stream.StreamIndex,
@@ -418,6 +410,8 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             DecodedFrameCount = decodedFrames,
             WrittenPcmBytes = writtenBytes,
             CurrentTime = currentTime,
+            PresentationTime = presentationTime,
+            PlaybackRate = rate,
             OutputBufferedDuration = outputDiagnostic.BufferedDuration,
             OutputDeviceDelay = outputDiagnostic.DeviceDelay,
             LastError = error,

@@ -34,7 +34,7 @@ public sealed record PlaybackOptions
     public double InitialVolume { get; init; } = 1.0;
 
     /// <summary>
-    /// 初始播放速度。
+    /// 初始点播速度为 0.5 到 2，直播固定为 1。
     /// </summary>
     public double InitialPlaybackRate { get; init; } = 1.0;
 
@@ -54,7 +54,6 @@ public sealed record PlaybackOptions
     public NativeLibraryOptions NativeLibraries { get; init; } = new();
 }
 
-
 /// <summary>
 /// 视频硬件加速模式。
 /// </summary>
@@ -73,7 +72,6 @@ public enum VideoAccelerationMode
     /// </summary>
     RequireHardware
 }
-
 
 /// <summary>
 /// 显示端支持的 GPU 共享能力。
@@ -101,7 +99,6 @@ public sealed record VideoOutputCapabilities
     public byte[]? DeviceUuid { get; init; }
 }
 
-
 /// <summary>
 /// 网络播放的兼容或低延迟模式。
 /// </summary>
@@ -117,7 +114,6 @@ public enum NetworkPlaybackMode
     LowLatency
 }
 
-
 /// <summary>
 /// RTSP 使用的传输协议。
 /// </summary>
@@ -132,7 +128,6 @@ public enum RtspTransportMode
     /// </summary>
     Udp
 }
-
 
 /// <summary>
 /// 视频帧的播放调度模式。
@@ -152,7 +147,6 @@ public enum PlaybackTimingMode
     /// </summary>
     RealtimeLowLatency
 }
-
 
 /// <summary>
 /// 网络读取参数及远程文件、实时流的调度策略。
@@ -233,7 +227,6 @@ public sealed record NetworkPlaybackOptions
     /// </summary>
     public static NetworkPlaybackOptions LowLatency() => new();
 }
-
 
 /// <summary>
 /// 打开媒体源的请求。

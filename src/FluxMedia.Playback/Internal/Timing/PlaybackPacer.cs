@@ -33,6 +33,7 @@ internal static class PlaybackPacer
     /// </summary>
     public static double ClampPlaybackRate(double rate)
     {
+        if (double.IsNaN(rate) || double.IsInfinity(rate)) return 1.0;
         if (rate < 0.5)
         {
             return 0.5;

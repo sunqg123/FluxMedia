@@ -209,6 +209,11 @@ public sealed class PlayerItemViewModel : NotifyObject, IAsyncDisposable
     public Player Player { get; }
 
     /// <summary>
+    /// 核心提供的常用倍速档位。
+    /// </summary>
+    public IReadOnlyList<double> PlaybackSpeeds => FluxMedia.Playback.Player.SupportedSpeeds;
+
+    /// <summary>
     /// 浏览命令。
     /// </summary>
     public ICommand BrowseCommand { get; }

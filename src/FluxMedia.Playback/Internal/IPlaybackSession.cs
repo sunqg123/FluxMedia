@@ -45,6 +45,11 @@ internal interface IPlaybackSession : IAsyncDisposable
     bool CanSeek { get; }
 
     /// <summary>
+    /// 当前媒体是否允许倍速播放。
+    /// </summary>
+    bool CanChangeSpeed { get; }
+
+    /// <summary>
     /// 当前打开的媒体源。
     /// </summary>
     MediaSource? CurrentSource { get; }

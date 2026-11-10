@@ -502,7 +502,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             MediaInfo = FFmpegMediaInfoReader.BuildMediaInfo(formatContext);
             var timingMode = PlaybackTimingPolicy.Resolve(
                 _source, _options, MediaInfo.Duration);
-            _dropPacketsForLowLatency = _source.Kind == MediaSourceKind.NetworkStream && _options.Network.LowLatencyMode &&
+            _dropPacketsForLowLatency = PlaybackTimingPolicy.IsLiveNetworkSource(_source, MediaInfo.Duration) && _options.Network.LowLatencyMode &&
                 timingMode == PlaybackTimingMode.RealtimeLowLatency;
             OpenDiagnostic = new PlaybackDiagnosticInfo
             {

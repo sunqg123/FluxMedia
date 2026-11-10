@@ -11,6 +11,7 @@ FFmpeg/
       ffprobe.exe
 ```
 
+共享库需包含 avfilter，并提供 abuffer、atempo、aformat、abuffersink 音频滤镜。
 共享库与命令行工具应来自同一个构建。播放核心本身不要求命令行工具；媒体测试需要这两个工具。
 示例优先读取 `FLUXMEDIA_FFMPEG_ROOT`，未找到可用配置时向上查找上述目录。
 其他平台或自定义目录通过该环境变量或 `FluxEngineOptions.FFmpegPath` 指定实际库目录。

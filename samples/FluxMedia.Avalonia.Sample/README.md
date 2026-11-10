@@ -2,6 +2,7 @@
 
 通过 ProjectReference 使用当前两个库，演示宿主配置和多播放器 UI。
 进度条使用 PositionSeconds 双向即时绑定，CanSeek 控制交互，核心仍独立拦截直播 Seek。
+倍速选择绑定 Speed 与 CanChangeSpeed，提供 0.5、0.75、1、1.25、1.5、2 倍速；直播禁用。
 
 日志在运行输出目录的 Logs，FFmpeg 目录由环境变量或仓库 FFmpeg 目录提供。
 克隆仓库后执行 `git lfs pull`，获取 Windows x64 原生库和根目录的 Sample.mp4，也可自行选择媒体文件。

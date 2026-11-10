@@ -26,6 +26,13 @@ await player.StopRecordingAsync();
 await player.StopAsync();
 ```
 
+## Playback Speed
+
+Use `Player.CanChangeSpeed` to enable speed controls. `Player.Speed` supports binding,
+and `SetSpeedAsync` accepts rates from 0.5 to 2.0. Live and unknown-duration sources reject rate changes in the core.
+Audio uses FFmpeg atempo to preserve pitch; native libraries must include avfilter and the audio filters.
+Recording retains the original media timestamps.
+
 ## Notes
 
 - The default binding is FFmpeg.AutoGen 9.0.1.1 and requires matching FFmpeg 9 shared libraries.

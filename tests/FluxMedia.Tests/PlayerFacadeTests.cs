@@ -343,6 +343,11 @@ public sealed class PlayerFacadeTests
         public bool CanSeek => true;
 
         /// <summary>
+        /// 测试会话的点播倍速能力。
+        /// </summary>
+        public bool CanChangeSpeed => CanSeek && !IsLive;
+
+        /// <summary>
         /// 当前打开的媒体源。
         /// </summary>
         public MediaSource? CurrentSource => MediaSource.FromFile("binding-seek-test.mp4");

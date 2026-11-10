@@ -342,6 +342,7 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             var lastStatsAt = DateTimeOffset.UtcNow;
             if (initialPosition > TimeSpan.Zero) scheduler.Reset();
             var loggedPacketGeneration = -1L;
+            var wasPaused = false;
 
             ReportDiagnostics(null, null, firstDecodedFrameElapsed, readPackets, decodedFrames, pushedFrames, droppedVideoFrames, bufferingDecisionCount, lastVideoBufferedDuration, lowLatencyCatchUpActive, lastVideoAudioDistance, lastAudioClock, lastFrameAt, true, null, null, null, timingMode, frameRate);
             FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _instanceId, $"Event=PacketVideoWorkerStart SourceKind={_source.Kind} Url={_source.Uri} StreamIndex={_stream.StreamIndex} Decoder={ffmpeg.avcodec_get_name(_stream.CodecParameters->codec_id)} FrameRate={frameRate:0.###}");
@@ -354,6 +355,7 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         codecContext, frame, scheduler, ref sequence, ref lastTimestamp, ref lastResyncVersion, ref prerollDropUntil);
                     while (!_disposed && _isPaused() && !cancellationToken.IsCancellationRequested)
                     {
+                        wasPaused = true;
                         ApplyResyncIfNeeded(
                             codecContext, frame, scheduler, ref sequence, ref lastTimestamp, ref lastResyncVersion, ref prerollDropUntil);
                         Thread.Sleep(20);
@@ -362,6 +364,12 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                     if (_disposed || cancellationToken.IsCancellationRequested)
                     {
                         break;
+                    }
+
+                    if (wasPaused)
+                    {
+                        scheduler.ResetPresentationClock();
+                        wasPaused = false;
                     }
 
                     // 同步后只丢弃旧位置的包，保留新位置已经读到的关键包。

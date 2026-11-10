@@ -46,6 +46,16 @@ internal sealed record AudioPlaybackDiagnostics
     public TimeSpan? CurrentTime { get; init; }
 
     /// <summary>
+    /// 按设备缓冲和倍速估算的可听位置。
+    /// </summary>
+    public TimeSpan? PresentationTime { get; init; }
+
+    /// <summary>
+    /// 当前设备实际播放区间的倍速。
+    /// </summary>
+    public double PlaybackRate { get; init; } = 1.0;
+
+    /// <summary>
     /// 输出缓冲时长。
     /// </summary>
     public TimeSpan? OutputBufferedDuration { get; init; }
