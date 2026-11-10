@@ -1,9 +1,6 @@
-using FluxMedia.Playback;
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
-using FluxMedia.FFmpeg.Native;
 using FluxMedia.FFmpeg.Pipeline;
+using FluxMedia.Playback;
 
 namespace FluxMedia.Tests;
 

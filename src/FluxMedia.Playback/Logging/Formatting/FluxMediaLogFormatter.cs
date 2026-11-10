@@ -1,5 +1,5 @@
-using System.Text;
 using FluxMedia.Core.Configuration;
+using System.Text;
 
 namespace FluxMedia.Core.Logging;
 

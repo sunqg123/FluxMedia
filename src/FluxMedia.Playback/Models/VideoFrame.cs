@@ -1,4 +1,3 @@
-
 namespace FluxMedia.Core.Models;
 
 /// <summary>
@@ -180,69 +179,4 @@ public sealed class VideoFrame : IDisposable
             _owner?.Release();
         }
     }
-}
-
-
-/// <summary>
-/// 保留视频帧，释放租约后归还引用。
-/// </summary>
-public sealed class VideoFrameLease : IDisposable
-{
-    /// <summary>
-    /// 是否已释放资源。
-    /// </summary>
-    private int _disposed;
-
-    /// <summary>
-    /// 初始化视频帧租约所需的状态和资源。
-    /// </summary>
-    internal VideoFrameLease(VideoFrame frame)
-    {
-        Frame = frame;
-    }
-
-    /// <summary>
-    /// 帧。
-    /// </summary>
-    public VideoFrame Frame { get; }
-
-    /// <summary>
-    /// 释放当前对象持有的资源。
-    /// </summary>
-    public void Dispose()
-    {
-        if (Interlocked.Exchange(ref _disposed, 1) == 0)
-        {
-            Frame.ReleaseLease();
-        }
-    }
-}
-
-
-/// <summary>
-/// 管理视频帧底层资源的引用计数。
-/// </summary>
-internal interface IVideoFrameOwner
-{
-    /// <summary>
-    /// 增加底层资源的持有引用。
-    /// </summary>
-    void AddReference();
-
-    /// <summary>
-    /// 释放一个资源引用，最后一个引用负责清理。
-    /// </summary>
-    void Release();
-}
-
-
-/// <summary>
-/// 提供可复用的视频帧内存。
-/// </summary>
-internal interface IVideoFrameMemoryOwner : IVideoFrameOwner
-{
-    /// <summary>
-    /// 内存。
-    /// </summary>
-    Memory<byte> Memory { get; }
 }

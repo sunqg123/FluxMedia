@@ -1,0 +1,46 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:FluxMedia.Avalonia.Sample.Views"
+        xmlns:vm="clr-namespace:FluxMedia.Avalonia.Sample.ViewModels"
+        x:Class="FluxMedia.Avalonia.Sample.Views.MainWindow"
+        x:DataType="vm:MainWindowViewModel"
+        Width="1280"
+        Height="820"
+        MinWidth="900"
+        MinHeight="600"
+        Title="FluxMedia Multi Player">
+    <Grid RowDefinitions="Auto,*" Background="#111827">
+        <Border Padding="16,12" Background="#1F2937">
+            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+                <StackPanel>
+                    <TextBlock Text="FluxMedia Multi Player" FontSize="20" FontWeight="SemiBold" Foreground="White" />
+                    <TextBlock Text="MVVM · independent players · D3D11VA / VAAPI diagnostics"
+                               Foreground="#9CA3AF" />
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           VerticalAlignment="Center"
+                           Foreground="#D1D5DB"
+                           Text="{Binding PlayerCountText}" />
+                <Button Grid.Column="2"
+                        Padding="16,8"
+                        Content="+ Add player"
+                        Command="{Binding AddPlayerCommand}" />
+            </Grid>
+        </Border>
+
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Players}" Margin="14">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PlayerItemViewModel">
+                        <views:PlayerItemView />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </Grid>
+</Window>

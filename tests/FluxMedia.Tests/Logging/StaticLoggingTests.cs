@@ -1,9 +1,9 @@
-using System.Collections.Concurrent;
 using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.Core.State;
 using FluxMedia.Playback;
+using System.Collections.Concurrent;
 
 namespace FluxMedia.Tests;
 

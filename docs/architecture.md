@@ -17,6 +17,30 @@ flowchart TD
     Hub --> View[FluxPlayerView 或自定义消费者]
 ```
 
+## 源码职责目录
+
+`FluxMedia.Playback` 根目录提供 `FluxEngine`、`Player` 和 `FFmpegLibraries` 公开入口。
+内部实现按职责组织；目录与命名空间分别表达源码位置和类型身份。
+独立类型以类型名分别存放；较大的私有辅助类型通过 `partial` 分文件，保留原有嵌套作用域。
+
+| 目录 | 职责 |
+| --- | --- |
+| [Sessions](../src/FluxMedia.Playback/Internal/Sessions) | 会话契约、状态转换、控制协调和位置通知 |
+| [Pipeline](../src/FluxMedia.Playback/Internal/Pipeline) | 一代播放管线的任务、资源与回调 |
+| [Demuxing](../src/FluxMedia.Playback/Internal/Demuxing) | 打开参数、媒体信息、流描述与解复用 |
+| [Packets](../src/FluxMedia.Playback/Internal/Packets) | 压缩包租约、队列与读取 |
+| [Decoding](../src/FluxMedia.Playback/Internal/Decoding) | 音视频解码工作器及解码诊断 |
+| [Timing](../src/FluxMedia.Playback/Internal/Timing) | 音视频同步、呈现节奏、音频时间线和倍速策略 |
+| [Video](../src/FluxMedia.Playback/Internal/Video) | 视频帧池、帧泵和公开帧分发 |
+| [Seeking](../src/FluxMedia.Playback/Internal/Seeking) | Seek 合并、重同步与本代首帧等待 |
+| [Recording](../src/FluxMedia.Playback/Internal/Recording) | 录制控制与压缩包重封装 |
+| [Audio](../src/FluxMedia.Playback/Internal/Audio) | 音频设备、变速滤镜和输出诊断 |
+| [FFmpeg/Native](../src/FluxMedia.Playback/Internal/FFmpeg/Native) | 原生库加载、初始化与 FFmpeg 错误转换 |
+| [Hardware](../src/FluxMedia.Playback/Internal/Hardware) | 硬件视频上下文 |
+
+配置、公开数据类型和日志分别位于 `Configuration`、`Models`、`Logging`。
+Avalonia 显示位于独立的 `FluxMedia.Avalonia` 项目，自定义 UI 可直接使用核心帧输出。
+
 ## 生命周期
 
 每代管线只运行一次，独占解复用器、解码器、设备、取消信号和输入帧队列。

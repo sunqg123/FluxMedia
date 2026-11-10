@@ -1,14 +1,9 @@
-using System.Globalization;
-using System.Runtime.InteropServices;
 using FFmpeg.AutoGen;
 using FluxMedia.FFmpeg.Native;
+using System.Globalization;
+using System.Runtime.InteropServices;
 
 namespace FluxMedia.Playback.Internal.Audio;
-
-/// <summary>
-/// 接收变速后的交错 PCM。
-/// </summary>
-internal delegate void TempoPcmConsumer(ReadOnlySpan<byte> pcm, int samples, double rate);
 
 /// <summary>
 /// 用 atempo 保持音调，并统一输出 PCM 格式。

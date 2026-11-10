@@ -1,8 +1,8 @@
-using System.Runtime.InteropServices;
 using FFmpeg.AutoGen;
 using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Logging;
 using FluxMedia.FFmpeg.Native;
+using System.Runtime.InteropServices;
 
 namespace FluxMedia.Playback.Internal.Hardware;
 

@@ -1,4 +1,3 @@
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.State;
 
 namespace FluxMedia.Tests;

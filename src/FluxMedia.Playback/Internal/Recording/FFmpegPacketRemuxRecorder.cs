@@ -1,0 +1,788 @@
+using FFmpeg.AutoGen;
+using FluxMedia.Core.Configuration;
+using FluxMedia.Core.Logging;
+using FluxMedia.FFmpeg.Native;
+using FluxMedia.Playback;
+using System.Threading.Channels;
+
+namespace FluxMedia.FFmpeg.Pipeline;
+
+/// <summary>
+/// 将播放数据包封装为录制文件。
+/// </summary>
+internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
+{
+    /// <summary>
+    /// 写入队列容量。
+    /// </summary>
+    private const int WriteQueueCapacity = 512;
+
+    /// <summary>
+    /// 保护组件共享状态的同步锁。
+    /// </summary>
+    private readonly object _syncRoot = new();
+
+    /// <summary>
+    /// 保护录制写入状态的锁。
+    /// </summary>
+    private readonly object _writeGate = new();
+
+    /// <summary>
+    /// 等待封装写入的录制数据包队列。
+    /// </summary>
+    private readonly Channel<FFmpegPacketLease> _writeQueue;
+
+    /// <summary>
+    /// 配置。
+    /// </summary>
+    private PlaybackRecordingOptions _options;
+
+    /// <summary>
+    /// 实例标识。
+    /// </summary>
+    private readonly Guid _instanceId;
+
+    /// <summary>
+    /// 视频流。
+    /// </summary>
+    private readonly FFmpegStreamDescriptor? _videoStream;
+
+    /// <summary>
+    /// 音频流。
+    /// </summary>
+    private readonly FFmpegStreamDescriptor? _audioStream;
+
+    /// <summary>
+    /// 输出流。
+    /// </summary>
+    private readonly Dictionary<int, nint> _outputStreams = new();
+
+    /// <summary>
+    /// 各源流的时间基。
+    /// </summary>
+    private readonly Dictionary<int, AVRational> _inputTimeBases = new();
+
+    /// <summary>
+    /// 各输出流的时间戳偏移量。
+    /// </summary>
+    private readonly Dictionary<int, long> _timestampOffsets = new();
+
+    /// <summary>
+    /// 各输出流最近写入的解码时间戳。
+    /// </summary>
+    private readonly Dictionary<int, long> _lastOutputDts = new();
+
+    /// <summary>
+    /// FFmpeg 的原生容器上下文指针。
+    /// </summary>
+    private AVFormatContext* _formatContext;
+
+    /// <summary>
+    /// 诊断。
+    /// </summary>
+    private PlaybackRecordingDiagnosticInfo _diagnostic;
+
+    /// <summary>
+    /// 连续发生的输出写入失败次数。
+    /// </summary>
+    private int _consecutiveWriteFailures;
+
+    /// <summary>
+    /// 最近写入失败日志时刻。
+    /// </summary>
+    private DateTimeOffset? _lastWriteFailureLogAt;
+
+    /// <summary>
+    /// 当前输入分段的时间起点（微秒）。
+    /// </summary>
+    private long? _segmentOriginUs;
+
+    /// <summary>
+    /// 当前分段映射到输出的起点（微秒）。
+    /// </summary>
+    private long _segmentOutputBaseUs;
+
+    /// <summary>
+    /// 已写入数据的最晚结束时间（微秒）。
+    /// </summary>
+    private long _maxOutputEndUs;
+
+    /// <summary>
+    /// 已成功封装的数据包载荷总字节数。
+    /// </summary>
+    private long _writtenPayloadBytes;
+
+    /// <summary>
+    /// 已接收数据包数量。
+    /// </summary>
+    private long _receivedPacketCount;
+
+    /// <summary>
+    /// 已写入数据包数量。
+    /// </summary>
+    private long _writtenPacketCount;
+
+    /// <summary>
+    /// 已丢弃数据包数量。
+    /// </summary>
+    private long _droppedPacketCount;
+
+    /// <summary>
+    /// 写入器任务。
+    /// </summary>
+    private Task? _writerTask;
+
+    /// <summary>
+    /// 是否因时间线跳变暂停写入。
+    /// </summary>
+    private bool _writeSuspended;
+
+    /// <summary>
+    /// 是否仍接收新的录制数据包。
+    /// </summary>
+    private bool _acceptingWrites;
+
+    /// <summary>
+    /// 是否已启动。
+    /// </summary>
+    private bool _started;
+
+    /// <summary>
+    /// 是否已释放资源。
+    /// </summary>
+    private bool _disposed;
+
+    /// <summary>
+    /// 初始化 FFmpeg 数据包重新封装录制器所需的状态和资源。
+    /// </summary>
+    public FFmpegPacketRemuxRecorder(PlaybackRecordingOptions options, Guid instanceId, FFmpegStreamDescriptor? videoStream, FFmpegStreamDescriptor? audioStream)
+    {
+        _options = options;
+        _instanceId = instanceId;
+        _videoStream = videoStream;
+        _audioStream = audioStream;
+        _writeQueue = Channel.CreateBounded<FFmpegPacketLease>(new BoundedChannelOptions(WriteQueueCapacity)
+        {
+            FullMode = BoundedChannelFullMode.Wait,
+            SingleReader = false,
+            SingleWriter = false,
+            AllowSynchronousContinuations = false
+        });
+        FFmpegNativeRuntime.EnsureInitialized();
+        _diagnostic = new PlaybackRecordingDiagnosticInfo
+        {
+            State = PlaybackRecordingState.Idle,
+            OutputPath = options.OutputPath,
+            IncludesAudio = audioStream is not null
+        };
+    }
+
+    /// <summary>
+    /// 诊断。
+    /// </summary>
+    public PlaybackRecordingDiagnosticInfo Diagnostic
+    {
+        get
+        {
+            lock (_syncRoot)
+            {
+                var diagnostic = _diagnostic with
+                {
+                    ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
+                    EncodedFrameCount = Interlocked.Read(ref _writtenPacketCount),
+                    DroppedFrameCount = Interlocked.Read(ref _droppedPacketCount),
+                    RecordedDuration = _diagnostic.State != PlaybackRecordingState.Recording || _diagnostic.StartedAt is null
+                        ? _diagnostic.RecordedDuration
+                        : DateTimeOffset.UtcNow - _diagnostic.StartedAt.Value
+                };
+                return RefreshFileInfo(diagnostic);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 启动录制输出和后台封装任务。
+    /// </summary>
+    public void Start()
+    {
+        lock (_syncRoot)
+        {
+            ThrowIfDisposed();
+            if (_started) return;
+            PrepareOutputPath();
+            OpenOutput();
+            _started = true;
+            _acceptingWrites = true;
+            _diagnostic = _diagnostic with
+            {
+                State = PlaybackRecordingState.Recording,
+                StartedAt = DateTimeOffset.UtcNow,
+                LastError = null
+            };
+            _writerTask = Task.Run(WriteLoop);
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingStart OutputPath={_options.OutputPath} HasVideo={_videoStream is not null} HasAudio={_audioStream is not null}");
+        }
+    }
+
+    /// <summary>
+    /// 尝试将数据包加入待写入队列。
+    /// </summary>
+    public void TryWrite(AVPacket* sourcePacket)
+    {
+        if (sourcePacket != null && (sourcePacket->flags & ffmpeg.AV_PKT_FLAG_CORRUPT) != 0)
+        {
+            Interlocked.Increment(ref _droppedPacketCount);
+            if (sourcePacket->stream_index == _videoStream?.StreamIndex)
+            {
+                SuspendForDiscontinuity();
+                ResumeAfterDiscontinuity();
+            }
+            return;
+        }
+        FFmpegPacketLease? packetLease = null;
+        lock (_syncRoot)
+        {
+            if (!_started || !_acceptingWrites || _disposed || _writeSuspended || sourcePacket == null || !_outputStreams.ContainsKey(sourcePacket->stream_index)) return;
+            try
+            {
+                packetLease = FFmpegPacketLease.Clone(sourcePacket, 0);
+            }
+            catch
+            {
+                Interlocked.Increment(ref _droppedPacketCount);
+                return;
+            }
+        }
+
+        Interlocked.Increment(ref _receivedPacketCount);
+        if (!_writeQueue.Writer.TryWrite(packetLease))
+        {
+            packetLease.Dispose();
+            Interlocked.Increment(ref _droppedPacketCount);
+        }
+    }
+
+    /// <summary>
+    /// 按顺序封装队列中的录制数据包。
+    /// </summary>
+    private void WriteLoop()
+    {
+        try
+        {
+            while (_writeQueue.Reader.WaitToReadAsync().AsTask().GetAwaiter().GetResult())
+            {
+                while (_writeQueue.Reader.TryRead(out var packetLease))
+                {
+                    using (packetLease)
+                    {
+                        lock (_writeGate)
+                        {
+                            WritePacket(packetLease.Packet);
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            while (_writeQueue.Reader.TryRead(out var pending))
+            {
+                pending.Dispose();
+                Interlocked.Increment(ref _droppedPacketCount);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 转换时间戳并将数据包写入输出容器。
+    /// </summary>
+    private void WritePacket(AVPacket* packet)
+    {
+        if (!_started || _writeSuspended || packet == null || !_outputStreams.TryGetValue(packet->stream_index, out var outputStreamPtr))
+        {
+            Interlocked.Increment(ref _droppedPacketCount);
+            return;
+        }
+
+        try
+        {
+            var outputStream = (AVStream*)outputStreamPtr;
+            var inputTimeBase = _inputTimeBases[packet->stream_index];
+            if (!TryEstablishSegmentOrigin(packet, inputTimeBase))
+            {
+                Interlocked.Increment(ref _droppedPacketCount);
+                return;
+            }
+
+            var sourceDtsUs = PacketTimestampUs(packet->dts, inputTimeBase);
+            var sourcePtsUs = PacketTimestampUs(packet->pts, inputTimeBase);
+            if ((sourceDtsUs is not null && sourceDtsUs < _segmentOriginUs) || (sourcePtsUs is not null && sourcePtsUs < _segmentOriginUs))
+            {
+                Interlocked.Increment(ref _droppedPacketCount);
+                return;
+            }
+
+            packet->dts = MapSegmentTimestamp(sourceDtsUs, outputStream->time_base);
+            packet->pts = MapSegmentTimestamp(sourcePtsUs, outputStream->time_base);
+            packet->duration = ffmpeg.av_rescale_q(packet->duration, inputTimeBase, outputStream->time_base);
+
+            NormalizeOutputTimestamps(packet, outputStream->index);
+            packet->stream_index = outputStream->index;
+            packet->pos = -1;
+            var packetSize = Math.Max(0, packet->size);
+            if (_options.SimulatedWriteQuotaBytes is long quota && _writtenPayloadBytes + packetSize > quota)
+            {
+                throw new IOException($"Recording storage quota exceeded after {_writtenPayloadBytes} bytes.");
+            }
+
+            var write = ffmpeg.av_interleaved_write_frame(_formatContext, packet);
+            FFmpegErrorHelper.ThrowIfError(write, "av_interleaved_write_frame");
+            _writtenPayloadBytes += packetSize;
+            UpdateOutputEnd(packet, outputStream->time_base);
+            _consecutiveWriteFailures = 0;
+            Interlocked.Increment(ref _writtenPacketCount);
+        }
+        catch (Exception ex)
+        {
+            _consecutiveWriteFailures++;
+            Interlocked.Increment(ref _droppedPacketCount);
+            lock (_syncRoot)
+            {
+                _diagnostic = _diagnostic with
+                {
+                    LastError = ex.Message
+                };
+            }
+            var now = DateTimeOffset.UtcNow;
+            if (_lastWriteFailureLogAt is null || now - _lastWriteFailureLogAt >= TimeSpan.FromSeconds(2))
+            {
+                _lastWriteFailureLogAt = now;
+                FluxMediaLog.Write(LogLevel.Warning, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxWriteFailed OutputPath={_options.OutputPath} ConsecutiveFailures={_consecutiveWriteFailures} Error={ex.Message}", ex);
+            }
+
+            if (_consecutiveWriteFailures >= 8)
+            {
+                AbortAfterWriteFailures(ex);
+            }
+        }
+    }
+
+    /// <summary>
+    /// 暂停写入并等待新的时间分段。
+    /// </summary>
+    public void SuspendForDiscontinuity()
+    {
+        lock (_syncRoot)
+        {
+            if (!_started || _disposed) return;
+            _writeSuspended = true;
+        }
+        lock (_writeGate)
+        {
+            while (_writeQueue.Reader.TryRead(out var pending))
+            {
+                pending.Dispose();
+                Interlocked.Increment(ref _droppedPacketCount);
+            }
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxDiscontinuitySuspended OutputBaseUs={_maxOutputEndUs}");
+        }
+    }
+
+    /// <summary>
+    /// 在新的时间分段恢复录制。
+    /// </summary>
+    public void ResumeAfterDiscontinuity()
+    {
+        lock (_writeGate)
+        {
+            _segmentOutputBaseUs = _maxOutputEndUs;
+            _segmentOriginUs = null;
+        }
+
+        lock (_syncRoot)
+        {
+            if (!_started || _disposed) return;
+            _writeSuspended = false;
+            FluxMediaLog.Write(
+                LogLevel.Information, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxDiscontinuityResumed OutputBaseUs={_segmentOutputBaseUs} WaitingForVideoKeyFrame={_videoStream is not null}");
+        }
+    }
+
+    /// <summary>
+    /// 确定当前录制分段的输入时间起点。
+    /// </summary>
+    private bool TryEstablishSegmentOrigin(AVPacket* packet, AVRational inputTimeBase)
+    {
+        if (_segmentOriginUs is not null) return true;
+        if (_videoStream is not null)
+        {
+            if (packet->stream_index != _videoStream.StreamIndex || (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) == 0) return false;
+        }
+        var timestamp = packet->dts != ffmpeg.AV_NOPTS_VALUE ? packet->dts : packet->pts;
+        if (timestamp == ffmpeg.AV_NOPTS_VALUE) return false;
+        _segmentOriginUs = ffmpeg.av_rescale_q(timestamp, inputTimeBase, new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE });
+        FluxMediaLog.Write(
+            LogLevel.Information, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxTimelineStarted StreamIndex={packet->stream_index} OriginUs={_segmentOriginUs.Value} OutputBaseUs={_segmentOutputBaseUs} KeyFrame={(packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0}");
+        return true;
+    }
+
+    /// <summary>
+    /// 将分段时间映射到连续的输出时间线。
+    /// </summary>
+    private long MapSegmentTimestamp(long? sourceTimestampUs, AVRational outputTimeBase)
+    {
+        if (sourceTimestampUs is null)
+        {
+            return ffmpeg.AV_NOPTS_VALUE;
+        }
+
+        var mappedUs = _segmentOutputBaseUs + sourceTimestampUs.Value - _segmentOriginUs!.Value;
+        return ffmpeg.av_rescale_q(Math.Max(0, mappedUs), new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE }, outputTimeBase);
+    }
+
+    /// <summary>
+    /// 将数据包时间戳换算为微秒。
+    /// </summary>
+    private static long? PacketTimestampUs(long timestamp, AVRational inputTimeBase)
+    {
+        return timestamp == ffmpeg.AV_NOPTS_VALUE ? null : ffmpeg.av_rescale_q(timestamp, inputTimeBase, new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE });
+    }
+
+    /// <summary>
+    /// 更新已输出内容的结束时间。
+    /// </summary>
+    private void UpdateOutputEnd(AVPacket* packet, AVRational outputTimeBase)
+    {
+        var timestamp = packet->dts != ffmpeg.AV_NOPTS_VALUE ? packet->dts : packet->pts;
+        if (timestamp == ffmpeg.AV_NOPTS_VALUE) return;
+        var end = timestamp + Math.Max(0, packet->duration);
+        var endUs = ffmpeg.av_rescale_q(end, outputTimeBase, new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE });
+        _maxOutputEndUs = Math.Max(_maxOutputEndUs, endUs);
+    }
+
+    /// <summary>
+    /// 取消待执行操作并停止播放管线。
+    /// </summary>
+    public ValueTask StopAsync(CancellationToken cancellationToken = default)
+    {
+        Task? writerTask;
+        lock (_syncRoot)
+        {
+            if (_disposed) return default;
+            _acceptingWrites = false;
+            _writeQueue.Writer.TryComplete();
+            writerTask = _writerTask;
+        }
+        if (writerTask is null || writerTask.IsCompleted)
+        {
+            writerTask?.GetAwaiter().GetResult();
+            cancellationToken.ThrowIfCancellationRequested();
+            FinishAfterDrain();
+            return default;
+        }
+        return new ValueTask(FFmpegPacketRemuxRecorderAwaiter.AwaitAndRunAsync(writerTask, cancellationToken, FinishAfterDrain));
+    }
+
+    /// <summary>
+    /// 排空待写入数据包后结束录制。
+    /// </summary>
+    private void FinishAfterDrain()
+    {
+        lock (_writeGate)
+        {
+            lock (_syncRoot)
+            {
+                if (!_started || _diagnostic.State != PlaybackRecordingState.Recording) return;
+            }
+
+            Finish();
+        }
+    }
+
+    /// <summary>
+    /// 释放当前对象持有的资源。
+    /// </summary>
+    public ValueTask DisposeAsync()
+    {
+        var stop = StopAsync();
+        if (!stop.IsCompletedSuccessfully)
+        {
+            return new ValueTask(FFmpegPacketRemuxRecorderAwaiter.AwaitAndRunAsync(stop.AsTask(), CancellationToken.None, MarkDisposed));
+        }
+
+        stop.GetAwaiter().GetResult();
+        MarkDisposed();
+        return default;
+    }
+
+    /// <summary>
+    /// 标记录制器已释放。
+    /// </summary>
+    private void MarkDisposed()
+    {
+        lock (_syncRoot)
+        {
+            if (_disposed) return;
+            _disposed = true;
+        }
+    }
+
+    /// <summary>
+    /// 创建输出上下文并写入文件头。
+    /// </summary>
+    private void OpenOutput()
+    {
+        AVFormatContext* output = null;
+        FFmpegErrorHelper.ThrowIfError(ffmpeg.avformat_alloc_output_context2(&output, null, null, _options.OutputPath), "avformat_alloc_output_context2");
+        _formatContext = output;
+        if (_formatContext == null)
+        {
+            throw new InvalidOperationException("Failed to allocate recording output context.");
+        }
+
+        if (_videoStream is not null)
+        {
+            AddStream(_videoStream);
+        }
+
+        if (_audioStream is not null)
+        {
+            AddStream(_audioStream);
+        }
+
+        if (_outputStreams.Count == 0)
+        {
+            throw new InvalidOperationException("No audio or video streams are available for packet remux recording.");
+        }
+
+        if ((_formatContext->oformat->flags & ffmpeg.AVFMT_NOFILE) == 0)
+        {
+            FFmpegErrorHelper.ThrowIfError(ffmpeg.avio_open(&_formatContext->pb, _options.OutputPath, ffmpeg.AVIO_FLAG_WRITE), "avio_open");
+        }
+
+        FFmpegErrorHelper.ThrowIfError(ffmpeg.avformat_write_header(_formatContext, null), "avformat_write_header");
+    }
+
+    /// <summary>
+    /// 复制源流参数并添加输出流。
+    /// </summary>
+    private void AddStream(FFmpegStreamDescriptor inputStream)
+    {
+        var outputStream = ffmpeg.avformat_new_stream(_formatContext, null);
+        if (outputStream == null)
+        {
+            throw new InvalidOperationException("Failed to create recording output stream.");
+        }
+
+        FFmpegErrorHelper.ThrowIfError(ffmpeg.avcodec_parameters_copy(outputStream->codecpar, inputStream.CodecParameters), "avcodec_parameters_copy");
+        outputStream->codecpar->codec_tag = 0;
+        outputStream->time_base = inputStream.TimeBase;
+        _outputStreams[inputStream.StreamIndex] = (nint)outputStream;
+        _inputTimeBases[inputStream.StreamIndex] = inputStream.TimeBase;
+    }
+
+    /// <summary>
+    /// 修正输出时间戳，保持解码时间递增。
+    /// </summary>
+    private void NormalizeOutputTimestamps(AVPacket* packet, int outputStreamIndex)
+    {
+        if (packet->dts == ffmpeg.AV_NOPTS_VALUE) return;
+        var offset = _timestampOffsets.TryGetValue(outputStreamIndex, out var currentOffset) ? currentOffset : 0;
+        var adjustedDts = packet->dts + offset;
+        if (_lastOutputDts.TryGetValue(outputStreamIndex, out var lastDts) && adjustedDts <= lastDts)
+        {
+            offset += lastDts + 1 - adjustedDts;
+            _timestampOffsets[outputStreamIndex] = offset;
+            adjustedDts = packet->dts + offset;
+        }
+
+        packet->dts = adjustedDts;
+        if (packet->pts != ffmpeg.AV_NOPTS_VALUE)
+        {
+            packet->pts += offset;
+            if (packet->pts < packet->dts)
+            {
+                packet->pts = packet->dts;
+            }
+        }
+
+        _lastOutputDts[outputStreamIndex] = packet->dts;
+    }
+
+    /// <summary>
+    /// 连续写入失败达到阈值时终止录制。
+    /// </summary>
+    private void AbortAfterWriteFailures(Exception exception)
+    {
+        lock (_syncRoot)
+        {
+            _diagnostic = RefreshFileInfo(_diagnostic with
+            {
+                State = PlaybackRecordingState.Failed,
+                StoppedAt = DateTimeOffset.UtcNow,
+                LastError = $"Recording stopped after {_consecutiveWriteFailures} consecutive packet write failures: {exception.Message}",
+                OutputFileFinalized = false,
+                ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
+                EncodedFrameCount = Interlocked.Read(ref _writtenPacketCount),
+                DroppedFrameCount = Interlocked.Read(ref _droppedPacketCount)
+            });
+            _started = false;
+            _acceptingWrites = false;
+            _writeQueue.Writer.TryComplete();
+        }
+        FluxMediaLog.Write(
+            LogLevel.Error, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingAborted OutputPath={_options.OutputPath} ConsecutiveFailures={_consecutiveWriteFailures} Error={exception.Message}", exception);
+        CloseOutput(writeTrailer: false);
+    }
+
+    /// <summary>
+    /// 完成录制封装并更新最终状态。
+    /// </summary>
+    private void Finish()
+    {
+        try
+        {
+            FFmpegErrorHelper.ThrowIfError(ffmpeg.av_write_trailer(_formatContext), "av_write_trailer");
+            if (Interlocked.Read(ref _writtenPacketCount) == 0)
+            {
+                throw new InvalidOperationException("Recording did not receive a decodable video keyframe; no media packets were written.");
+            }
+
+            lock (_syncRoot)
+            {
+                _diagnostic = RefreshFileInfo(_diagnostic with
+                {
+                    State = PlaybackRecordingState.Completed,
+                    StoppedAt = DateTimeOffset.UtcNow,
+                    RecordedDuration = _diagnostic.StartedAt is null ? _diagnostic.RecordedDuration : DateTimeOffset.UtcNow - _diagnostic.StartedAt.Value,
+                    OutputFileFinalized = true,
+                    ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
+                    EncodedFrameCount = Interlocked.Read(ref _writtenPacketCount),
+                    DroppedFrameCount = Interlocked.Read(ref _droppedPacketCount)
+                });
+            }
+            var diagnostic = Diagnostic;
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingStop OutputPath={_options.OutputPath} Packets={diagnostic.EncodedFrameCount} Dropped={diagnostic.DroppedFrameCount} OutputFileSize={diagnostic.OutputFileSize}");
+        }
+        catch (Exception ex)
+        {
+            lock (_syncRoot)
+            {
+                _diagnostic = RefreshFileInfo(_diagnostic with
+                {
+                    State = PlaybackRecordingState.Failed,
+                    StoppedAt = DateTimeOffset.UtcNow,
+                    RecordedDuration = _diagnostic.StartedAt is null ? _diagnostic.RecordedDuration : DateTimeOffset.UtcNow - _diagnostic.StartedAt.Value,
+                    LastError = ex.Message,
+                    OutputFileFinalized = false,
+                    ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
+                    EncodedFrameCount = Interlocked.Read(ref _writtenPacketCount),
+                    DroppedFrameCount = Interlocked.Read(ref _droppedPacketCount)
+                });
+            }
+            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingFailed OutputPath={_options.OutputPath} Error={ex.Message}", ex);
+        }
+        finally
+        {
+            CloseOutput(writeTrailer: false);
+            lock (_syncRoot)
+            {
+                _started = false;
+                _acceptingWrites = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 关闭输出文件及封装上下文。
+    /// </summary>
+    private void CloseOutput(bool writeTrailer)
+    {
+        if (_formatContext == null) return;
+        if (writeTrailer)
+        {
+            ffmpeg.av_write_trailer(_formatContext);
+        }
+        if (_formatContext->pb != null)
+        {
+            ffmpeg.avio_closep(&_formatContext->pb);
+        }
+        ffmpeg.avformat_free_context(_formatContext);
+        _formatContext = null;
+    }
+
+    /// <summary>
+    /// 检查输出路径及覆盖策略。
+    /// </summary>
+    private void PrepareOutputPath()
+    {
+        if (string.IsNullOrWhiteSpace(_options.OutputPath))
+        {
+            throw new ArgumentException("Recording output path cannot be empty.", nameof(_options.OutputPath));
+        }
+
+        var fullPath = Path.GetFullPath(_options.OutputPath);
+        var directory = Path.GetDirectoryName(fullPath);
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            throw new ArgumentException("Unable to resolve recording output directory.", nameof(_options.OutputPath));
+        }
+
+        if (!Directory.Exists(directory))
+        {
+            if (!_options.CreateOutputDirectory)
+            {
+                throw new DirectoryNotFoundException($"Recording output directory does not exist: {directory}");
+            }
+
+            Directory.CreateDirectory(directory);
+        }
+
+        if (File.Exists(fullPath))
+        {
+            if (!_options.OverwriteExisting)
+            {
+                throw new IOException($"Recording output file already exists: {fullPath}");
+            }
+
+            File.Delete(fullPath);
+        }
+
+        _options = _options with
+        {
+            OutputPath = fullPath
+        };
+    }
+
+    /// <summary>
+    /// 更新输出文件是否存在及大小。
+    /// </summary>
+    private static PlaybackRecordingDiagnosticInfo RefreshFileInfo(PlaybackRecordingDiagnosticInfo diagnostic)
+    {
+        if (string.IsNullOrWhiteSpace(diagnostic.OutputPath) || !File.Exists(diagnostic.OutputPath))
+        {
+            return diagnostic with
+            {
+                OutputFileExists = false,
+                OutputFileSize = 0
+            };
+        }
+
+        return diagnostic with
+        {
+            OutputFileExists = true,
+            OutputFileSize = new FileInfo(diagnostic.OutputPath).Length
+        };
+    }
+
+    /// <summary>
+    /// 对象已释放时阻止继续操作。
+    /// </summary>
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(FFmpegPacketRemuxRecorder));
+        }
+    }
+}

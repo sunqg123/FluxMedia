@@ -1,6 +1,6 @@
-using System.Runtime.InteropServices;
 using FFmpeg.AutoGen;
 using FluxMedia.FFmpeg.Native;
+using System.Runtime.InteropServices;
 
 namespace FluxMedia.Playback;
 

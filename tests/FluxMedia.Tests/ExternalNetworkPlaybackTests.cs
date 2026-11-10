@@ -1,4 +1,3 @@
-using FluxMedia.Core.Configuration;
 using FluxMedia.Playback;
 
 namespace FluxMedia.Tests;

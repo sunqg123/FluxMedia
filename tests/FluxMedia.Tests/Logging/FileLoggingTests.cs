@@ -1,7 +1,7 @@
-using FluxMedia.Playback;
 using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Logging;
 using FluxMedia.FFmpeg.Native;
+using FluxMedia.Playback;
 
 namespace FluxMedia.Tests;
 

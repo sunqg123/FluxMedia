@@ -1,8 +1,6 @@
+using FluxMedia.Playback;
 using System.Net;
 using System.Net.Sockets;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Models;
-using FluxMedia.Playback;
 
 namespace FluxMedia.Tests;
 

@@ -1,5 +1,5 @@
-using System.Text;
 using FFmpeg.AutoGen;
+using System.Text;
 
 namespace FluxMedia.FFmpeg.Native;
 

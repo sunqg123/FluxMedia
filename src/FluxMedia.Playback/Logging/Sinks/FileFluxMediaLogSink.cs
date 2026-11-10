@@ -1,6 +1,6 @@
+using FluxMedia.Core.Configuration;
 using System.Collections.Concurrent;
 using System.Text;
-using FluxMedia.Core.Configuration;
 
 namespace FluxMedia.Core.Logging;
 

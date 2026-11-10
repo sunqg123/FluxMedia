@@ -1,8 +1,9 @@
-using System.Runtime.InteropServices;
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using FluxMedia.Avalonia.Sample.Views;
 using FluxMedia.Playback;
+using System.Runtime.InteropServices;
 
 namespace FluxMedia.Avalonia.Sample;
 

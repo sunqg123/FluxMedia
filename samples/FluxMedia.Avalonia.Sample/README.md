@@ -1,6 +1,22 @@
 # 项目引用示例
 
 通过 ProjectReference 使用当前两个库，演示宿主配置和多播放器 UI。
+
+## 目录结构
+
+| 目录 | 职责 |
+| --- | --- |
+| `Models` | `PlayerInput` 保存媒体地址和录制路径等输入数据 |
+| `Views` | 主窗口、独立播放器卡片，以及文件选择等界面操作 |
+| `ViewModels` | 管理播放器集合、播放命令和界面状态 |
+| `Commands` | 同步和异步命令实现 |
+| `Infrastructure` | 属性变更通知基类 |
+
+`App` 负责引擎初始化。`MainWindow` 将文件选择回调传给视图模型，视图模型不持有窗口。
+`PlayerItemView` 继承列表项的数据上下文，输入绑定到 `Input`，播放属性绑定到核心 `Player`。
+
+## 播放控制
+
 进度条使用 PositionSeconds 双向即时绑定，CanSeek 控制交互，核心仍独立拦截直播 Seek。
 倍速选择绑定 Speed 与 CanChangeSpeed，提供 0.5、0.75、1、1.25、1.5、2 倍速；直播禁用。
 

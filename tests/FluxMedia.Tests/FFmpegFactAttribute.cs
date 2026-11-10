@@ -1,5 +1,5 @@
-using System.Runtime.InteropServices;
 using FluxMedia.Playback;
+using System.Runtime.InteropServices;
 
 namespace FluxMedia.Tests;
 
