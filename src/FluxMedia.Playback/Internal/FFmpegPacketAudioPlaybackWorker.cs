@@ -102,8 +102,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     /// <summary>
     /// 初始化 FFmpeg 数据包音频播放工作线程所需的状态和资源。
     /// </summary>
-    public FFmpegPacketAudioPlaybackWorker(
-        MediaSource source, Guid instanceId, TimeSpan startPosition, FFmpegStreamDescriptor stream, ChannelReader<FFmpegPacketLease> packets, Func<long> packetGeneration, IAudioOutputDevice output, Func<bool> isPaused, Func<double> playbackRate, Func<double> volume, Func<bool> isMuted, Action<AudioPlaybackDiagnostics>? onDiagnostics = null, Func<PlaybackResyncRequest>? resyncRequest = null, FFmpegPacketConsumer? recordingPacketConsumer = null)
+    public FFmpegPacketAudioPlaybackWorker(MediaSource source, Guid instanceId, TimeSpan startPosition, FFmpegStreamDescriptor stream, ChannelReader<FFmpegPacketLease> packets, Func<long> packetGeneration, IAudioOutputDevice output, Func<bool> isPaused, Func<double> playbackRate, Func<double> volume, Func<bool> isMuted, Action<AudioPlaybackDiagnostics>? onDiagnostics = null, Func<PlaybackResyncRequest>? resyncRequest = null, FFmpegPacketConsumer? recordingPacketConsumer = null)
     {
         _source = source;
         _instanceId = instanceId;
@@ -226,32 +225,26 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             {
                 using (packetLease)
                 {
-                    ApplyResyncIfNeeded(
-                        codecContext, frame, ref tempo, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
+                    ApplyResyncIfNeeded(codecContext, frame, ref tempo, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
                     while (!_disposed && _isPaused() && !cancellationToken.IsCancellationRequested)
                     {
-                        ApplyResyncIfNeeded(
-                            codecContext, frame, ref tempo, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
+                        ApplyResyncIfNeeded(codecContext, frame, ref tempo, sampleRate, outputChannels, outputFormat, decodedFrames, writtenBytes, ref currentTime, ref lastResyncVersion, ref prerollDropUntil);
                         if (!wasPaused)
                         {
                             wasPaused = true;
                             _output.Pause();
                             Report(sampleRate, outputChannels, outputFormat, "Paused", decodedFrames, writtenBytes, currentTime, null);
                         }
-
                         Thread.Sleep(20);
                     }
-
                     if (_disposed || cancellationToken.IsCancellationRequested)
                     {
                         break;
                     }
-
                     // 同步后只丢弃旧位置的包，保留新位置已经读到的关键包。
                     if (packetLease is not null && packetLease.Generation != _packetGeneration())
                     {
-                        FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketAudioPlaybackWorker), _instanceId,
-                            $"Event=SeekPacketDiscarded Kind=Audio PacketGeneration={packetLease.Generation} CurrentGeneration={_packetGeneration()}");
+                        FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketAudioPlaybackWorker), _instanceId, $"Event=SeekPacketDiscarded Kind=Audio PacketGeneration={packetLease.Generation} CurrentGeneration={_packetGeneration()}");
                         continue;
                     }
 
@@ -277,8 +270,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
                         }
 
                         FFmpegErrorHelper.ThrowIfError(receive, "avcodec_receive_frame");
-                        currentTime = FrameTimestamp(
-                            frame, _stream.TimeBase, _stream.StartTime, decodedFrames, sampleRate);
+                        currentTime = FrameTimestamp(frame, _stream.TimeBase, _stream.StartTime, decodedFrames, sampleRate);
                         if (ShouldDropPrerollFrame(currentTime, ref prerollDropUntil))
                         {
                             decodedFrames++;
@@ -374,16 +366,8 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     private static bool ShouldDropPrerollFrame(TimeSpan timestamp, ref TimeSpan? prerollDropUntil)
     {
         var target = prerollDropUntil;
-        if (target is null)
-        {
-            return false;
-        }
-
-        if (timestamp + SeekPrerollTolerance < target.Value)
-        {
-            return true;
-        }
-
+        if (target is null) return false;
+        if (timestamp + SeekPrerollTolerance < target.Value) return true;
         prerollDropUntil = null;
         return false;
     }
@@ -423,8 +407,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     /// <summary>
     /// 将音频帧时间戳换算为媒体时间。
     /// </summary>
-    private static TimeSpan FrameTimestamp(
-        AVFrame* frame, AVRational timeBase, TimeSpan timestampOrigin, long sequence, int sampleRate)
+    private static TimeSpan FrameTimestamp(AVFrame* frame, AVRational timeBase, TimeSpan timestampOrigin, long sequence, int sampleRate)
     {
         var pts = frame->best_effort_timestamp;
         if (pts >= 0)

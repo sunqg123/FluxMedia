@@ -90,11 +90,8 @@ internal sealed class FileFluxMediaLogSink : IFluxMediaLogSink, IDisposable
         _logDirectory = ResolveLogDirectory(actualOptions.Directory);
         _filePrefix = actualOptions.FilePrefix?.Trim() ?? string.Empty;
         _rollingMode = actualOptions.RollingMode;
-        _flushInterval = actualOptions.FlushInterval > TimeSpan.Zero
-            ? actualOptions.FlushInterval
-            : TimeSpan.FromSeconds(1);
+        _flushInterval = actualOptions.FlushInterval > TimeSpan.Zero ? actualOptions.FlushInterval : TimeSpan.FromSeconds(1);
         _queue = new BlockingCollection<LogRecord>(Math.Max(128, actualOptions.QueueCapacity));
-
         Directory.CreateDirectory(_logDirectory);
         _currentLogFilePath = BuildLogFilePath(DateTimeOffset.Now);
         _writerTask = Task.Run(WriteLoopAsync);
@@ -319,9 +316,7 @@ internal sealed class FileFluxMediaLogSink : IFluxMediaLogSink, IDisposable
     private static string ResolveLogDirectory(string directory)
     {
         var actualDirectory = string.IsNullOrWhiteSpace(directory) ? "logs" : directory.Trim();
-        return Path.IsPathRooted(actualDirectory)
-            ? actualDirectory
-            : Path.Combine(AppContext.BaseDirectory, actualDirectory);
+        return Path.IsPathRooted(actualDirectory) ? actualDirectory : Path.Combine(AppContext.BaseDirectory, actualDirectory);
     }
 
     /// <summary>

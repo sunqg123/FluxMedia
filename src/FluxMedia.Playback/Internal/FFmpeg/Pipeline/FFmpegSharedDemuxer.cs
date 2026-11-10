@@ -168,9 +168,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
         _startPosition = startPosition;
         _deferPacketReading = deferPacketReading;
         _readGate = new ManualResetEventSlim(!deferPacketReading);
-        _dropPacketsForLowLatency =
-            source.Kind == MediaSourceKind.NetworkStream &&
-            options.Network.LowLatencyMode;
+        _dropPacketsForLowLatency = source.Kind == MediaSourceKind.NetworkStream && options.Network.LowLatencyMode;
         if (_dropPacketsForLowLatency)
         {
             videoQueueCapacity = Math.Max(videoQueueCapacity, 60);
@@ -358,15 +356,13 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
 
         if (_demuxTask.IsCompleted)
         {
-            var exception = _demuxTask.Exception?.GetBaseException()
-                ?? new InvalidOperationException("The demuxer is no longer running.");
+            var exception = _demuxTask.Exception?.GetBaseException() ?? new InvalidOperationException("The demuxer is no longer running.");
             return new ValueTask<TimeSpan>(Task.FromException<TimeSpan>(exception));
         }
 
         var request = new DemuxSeekRequest(target);
         _seekRequests.Enqueue(request);
-        var registration = cancellationToken.CanBeCanceled
-            ? cancellationToken.Register(static state =>
+        var registration = cancellationToken.CanBeCanceled ? cancellationToken.Register(static state =>
             {
                 var seek = (DemuxSeekRequest)state!;
                 seek.TryCancel();
@@ -374,8 +370,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             : default;
         if (cancellationToken.CanBeCanceled)
         {
-            _ = request.Task.ContinueWith(
-                static (_, state) => ((CancellationTokenRegistration)state!).Dispose(), registration, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+            _ = request.Task.ContinueWith(static (_, state) => ((CancellationTokenRegistration)state!).Dispose(), registration, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
         return new ValueTask<TimeSpan>(request.Task);
@@ -400,11 +395,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
         Task? demuxTask;
         lock (_disposeSync)
         {
-            if (_disposed)
-            {
-                return;
-            }
-
+            if (_disposed) return;
             _disposed = true;
             Stop();
             demuxTask = _demuxTask;
@@ -417,8 +408,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
         }
 
         // 原生读取可能尚未退出，等线程结束后再释放队列和流参数。
-        _ = demuxTask.ContinueWith(
-            static (_, state) => ((FFmpegSharedDemuxer)state!).DisposeResources(), this, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        _ = demuxTask.ContinueWith(static (_, state) => ((FFmpegSharedDemuxer)state!).DisposeResources(), this, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     /// <summary>
@@ -428,11 +418,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     {
         lock (_disposeSync)
         {
-            if (_resourcesDisposed)
-            {
-                return;
-            }
-
+            if (_resourcesDisposed) return;
             _resourcesDisposed = true;
         }
 
@@ -468,8 +454,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
         try
         {
             _state = "Opening";
-            interrupt = PlaybackFFmpegOptions.CreateInterruptContext(
-                _source.Kind == MediaSourceKind.NetworkStream ? PlaybackFFmpegOptions.EffectiveOpenTimeout(_options) : _options.OpenTimeout, cancellationToken);
+            interrupt = PlaybackFFmpegOptions.CreateInterruptContext(_source.Kind == MediaSourceKind.NetworkStream ? PlaybackFFmpegOptions.EffectiveOpenTimeout(_options) : _options.OpenTimeout, cancellationToken);
             dictionary = PlaybackFFmpegOptions.CreateOpenDictionary(_source, _options, _instanceId);
             formatContext = ffmpeg.avformat_alloc_context();
             if (formatContext == null)
@@ -478,32 +463,26 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             }
 
             formatContext->interrupt_callback = interrupt.Callback;
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxOpenInputStart SourceKind={_source.Kind} Url={_source.Uri} FFmpegOpenOptions={PlaybackFFmpegOptions.Describe(_source, _options)}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxOpenInputStart SourceKind={_source.Kind} Url={_source.Uri} FFmpegOpenOptions={PlaybackFFmpegOptions.Describe(_source, _options)}");
             var openStartedAt = Stopwatch.GetTimestamp();
             var openResult = ffmpeg.avformat_open_input(&formatContext, _source.Uri, null, &dictionary);
             var openElapsed = PlaybackClock.ElapsedSince(openStartedAt);
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxOpenInputCompleted Result={openResult} Error={FormatError(openResult) ?? "-"} OpenElapsedMs={openElapsed.TotalMilliseconds:0}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxOpenInputCompleted Result={openResult} Error={FormatError(openResult) ?? "-"} OpenElapsedMs={openElapsed.TotalMilliseconds:0}");
             FFmpegErrorHelper.ThrowIfError(openResult, "avformat_open_input");
 
             interrupt.ResetDeadline();
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxFindStreamInfoStart SourceKind={_source.Kind} Url={_source.Uri}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxFindStreamInfoStart SourceKind={_source.Kind} Url={_source.Uri}");
             var streamInfoStartedAt = Stopwatch.GetTimestamp();
             var streamInfoResult = ffmpeg.avformat_find_stream_info(formatContext, null);
             var streamInfoElapsed = PlaybackClock.ElapsedSince(streamInfoStartedAt);
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxFindStreamInfoCompleted Result={streamInfoResult} Error={FormatError(streamInfoResult) ?? "-"} StreamInfoElapsedMs={streamInfoElapsed.TotalMilliseconds:0} Streams={formatContext->nb_streams}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxFindStreamInfoCompleted Result={streamInfoResult} Error={FormatError(streamInfoResult) ?? "-"} StreamInfoElapsedMs={streamInfoElapsed.TotalMilliseconds:0} Streams={formatContext->nb_streams}");
             FFmpegErrorHelper.ThrowIfError(streamInfoResult, "avformat_find_stream_info");
 
             VideoStream = FindStream(formatContext, AVMediaType.AVMEDIA_TYPE_VIDEO);
             AudioStream = FindStream(formatContext, AVMediaType.AVMEDIA_TYPE_AUDIO);
             MediaInfo = FFmpegMediaInfoReader.BuildMediaInfo(formatContext);
-            var timingMode = PlaybackTimingPolicy.Resolve(
-                _source, _options, MediaInfo.Duration);
-            _dropPacketsForLowLatency = PlaybackTimingPolicy.IsLiveNetworkSource(_source, MediaInfo.Duration) && _options.Network.LowLatencyMode &&
-                timingMode == PlaybackTimingMode.RealtimeLowLatency;
+            var timingMode = PlaybackTimingPolicy.Resolve(_source, _options, MediaInfo.Duration);
+            _dropPacketsForLowLatency = PlaybackTimingPolicy.IsLiveNetworkSource(_source, MediaInfo.Duration) && _options.Network.LowLatencyMode && timingMode == PlaybackTimingMode.RealtimeLowLatency;
             OpenDiagnostic = new PlaybackDiagnosticInfo
             {
                 SourceKind = _source.Kind,
@@ -511,9 +490,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
                 FFmpegOpenOptions = PlaybackFFmpegOptions.Describe(_source, _options),
                 OpenElapsed = openElapsed,
                 StreamInfoElapsed = streamInfoElapsed,
-                Protocol = Uri.TryCreate(_source.Uri, UriKind.Absolute, out var sourceUri)
-                    ? sourceUri.Scheme
-                    : _source.Kind.ToString(),
+                Protocol = Uri.TryCreate(_source.Uri, UriKind.Absolute, out var sourceUri) ? sourceUri.Scheme : _source.Kind.ToString(),
                 Container = MediaInfo.ContainerFormat,
                 FrameRate = MediaInfo.VideoFrameRate,
                 TimingMode = timingMode,
@@ -524,33 +501,28 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             };
             if (VideoStream is not null)
             {
-                _videoPackets.ConfigureTiming(
-                    VideoStream.TimeBase, EstimateVideoPacketDuration(VideoStream), VideoStream.StartTime);
+                _videoPackets.ConfigureTiming(VideoStream.TimeBase, EstimateVideoPacketDuration(VideoStream), VideoStream.StartTime);
             }
 
             if (AudioStream is not null)
             {
-                _audioPackets.ConfigureTiming(
-                    AudioStream.TimeBase, EstimateAudioPacketDuration(formatContext, AudioStream), AudioStream.StartTime);
+                _audioPackets.ConfigureTiming(AudioStream.TimeBase, EstimateAudioPacketDuration(formatContext, AudioStream), AudioStream.StartTime);
             }
 
             StartPendingRecordingIfNeeded();
             _ready?.TrySetResult(true);
             _state = "Running";
             var readGateStartedAt = Stopwatch.GetTimestamp();
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxReadGateWaiting DeferredPacketReading={_deferPacketReading}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxReadGateWaiting DeferredPacketReading={_deferPacketReading}");
             _readGate.Wait(cancellationToken);
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxReadGateReleased WaitElapsedMs={PlaybackClock.ElapsedSince(readGateStartedAt).TotalMilliseconds:0}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxReadGateReleased WaitElapsedMs={PlaybackClock.ElapsedSince(readGateStartedAt).TotalMilliseconds:0}");
 
             if (_startPosition > TimeSpan.Zero)
             {
                 EnsureSeekable();
                 var seekTarget = (long)(_startPosition.TotalSeconds * ffmpeg.AV_TIME_BASE);
                 var seekResult = ffmpeg.av_seek_frame(formatContext, -1, seekTarget, ffmpeg.AVSEEK_FLAG_BACKWARD);
-                FluxMediaLog.Write(
-                    seekResult < 0 ? LogLevel.Warning : LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxSeek Target={_startPosition} Result={seekResult} FFmpegErrorText={FormatError(seekResult) ?? "-"}");
+                FluxMediaLog.Write(seekResult < 0 ? LogLevel.Warning : LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxSeek Target={_startPosition} Result={seekResult} FFmpegErrorText={FormatError(seekResult) ?? "-"}");
                 FFmpegErrorHelper.ThrowIfError(seekResult, "av_seek_frame");
                 Interlocked.Increment(ref _packetGeneration);
             }
@@ -566,8 +538,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
                 throw new InvalidOperationException("FFmpeg packet allocation failed.");
             }
 
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxStart SourceKind={_source.Kind} Url={_source.Uri} VideoStream={VideoStream?.StreamIndex.ToString() ?? "-"} AudioStream={AudioStream?.StreamIndex.ToString() ?? "-"}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxStart SourceKind={_source.Kind} Url={_source.Uri} VideoStream={VideoStream?.StreamIndex.ToString() ?? "-"} AudioStream={AudioStream?.StreamIndex.ToString() ?? "-"}");
 
             var packetReadStartedAt = Stopwatch.GetTimestamp();
             var firstPacketLogged = false;
@@ -577,11 +548,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             {
                 while (_seekRequests.TryDequeue(out var seek))
                 {
-                    if (seek.IsCompleted)
-                    {
-                        continue;
-                    }
-
+                    if (seek.IsCompleted) continue;
                     try
                     {
                         var actual = SeekFormatContext(formatContext, seek.Target);
@@ -618,7 +585,6 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
                             throw new IOException($"Network media read interrupted ({read}).");
                         }
                     }
-
                     break;
                 }
 
@@ -629,8 +595,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
                     if (!firstPacketLogged)
                     {
                         firstPacketLogged = true;
-                        LogFirstPacket(
-                            "SharedDemuxFirstPacket", packet, PlaybackClock.ElapsedSince(packetReadStartedAt));
+                        LogFirstPacket("SharedDemuxFirstPacket", packet, PlaybackClock.ElapsedSince(packetReadStartedAt));
                     }
 
                     if (VideoStream is not null && packet->stream_index == VideoStream.StreamIndex)
@@ -638,16 +603,14 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
                         if (!firstVideoPacketLogged)
                         {
                             firstVideoPacketLogged = true;
-                            LogFirstPacket(
-                                "SharedDemuxFirstVideoPacket", packet, PlaybackClock.ElapsedSince(packetReadStartedAt));
+                            LogFirstPacket("SharedDemuxFirstVideoPacket", packet, PlaybackClock.ElapsedSince(packetReadStartedAt));
                         }
 
                         if (!firstVideoKeyPacketLogged &&
                             (packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0)
                         {
                             firstVideoKeyPacketLogged = true;
-                            LogFirstPacket(
-                                "SharedDemuxFirstVideoKeyPacket", packet, PlaybackClock.ElapsedSince(packetReadStartedAt));
+                            LogFirstPacket("SharedDemuxFirstVideoKeyPacket", packet, PlaybackClock.ElapsedSince(packetReadStartedAt));
                         }
 
                         if (RoutePacketWithBackpressure(_videoPackets, FFmpegPacketLease.Clone(packet, PacketGeneration), cancellationToken))
@@ -692,11 +655,17 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             _videoPackets.Complete();
             _audioPackets.Complete();
             if (packet != null)
+            {
                 ffmpeg.av_packet_free(&packet);
+            }
             if (dictionary != null)
+            {
                 ffmpeg.av_dict_free(&dictionary);
+            }
             if (formatContext != null)
+            {
                 ffmpeg.avformat_close_input(&formatContext);
+            }
             interrupt?.Dispose();
             FluxMediaLog.Write(
                 LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxExit Reason={exitReason} ReadPackets={ReadPacketCount} VideoPackets={RoutedVideoPacketCount} AudioPackets={RoutedAudioPacketCount} DroppedVideo={DroppedVideoPacketCount} DroppedAudio={DroppedAudioPacketCount}");
@@ -709,7 +678,9 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     private void EnsureSeekable()
     {
         if (MediaInfo is null || !PlaybackTimingPolicy.CanSeek(_source, MediaInfo.Duration))
+        {
             throw new NotSupportedException("直播或未知总时长的媒体不允许调整播放进度。");
+        }
     }
 
     /// <summary>
@@ -742,11 +713,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
 
         while (!_disposed && !cancellationToken.IsCancellationRequested)
         {
-            if (queue.TryWriteOrderedWithoutDrop(packet))
-            {
-                return true;
-            }
-
+            if (queue.TryWriteOrderedWithoutDrop(packet)) return true;
             if (!_seekRequests.IsEmpty)
             {
                 packet.Dispose();
@@ -755,7 +722,6 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
 
             Thread.Sleep(2);
         }
-
         packet.Dispose();
         return false;
     }
@@ -833,15 +799,11 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
         for (var index = 0; index < formatContext->nb_streams; index++)
         {
             var stream = formatContext->streams[index];
-            if (stream != null &&
-                stream->codecpar != null &&
-                stream->codecpar->codec_type == mediaType)
+            if (stream != null && stream->codecpar != null && stream->codecpar->codec_type == mediaType)
             {
-                return new FFmpegStreamDescriptor(
-                    index, mediaType, stream->time_base, stream->avg_frame_rate, stream->r_frame_rate, MediaStartTime(formatContext, stream), stream->codecpar);
+                return new FFmpegStreamDescriptor(index, mediaType, stream->time_base, stream->avg_frame_rate, stream->r_frame_rate, MediaStartTime(formatContext, stream), stream->codecpar);
             }
         }
-
         return null;
     }
 
@@ -865,9 +827,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
         }
 
         var seconds = stream->start_time * ffmpeg.av_q2d(stream->time_base);
-        return double.IsNaN(seconds) || double.IsInfinity(seconds)
-            ? TimeSpan.Zero
-            : TimeSpan.FromSeconds(Math.Max(0, seconds));
+        return double.IsNaN(seconds) || double.IsInfinity(seconds) ? TimeSpan.Zero : TimeSpan.FromSeconds(Math.Max(0, seconds));
     }
 
     /// <summary>
@@ -890,11 +850,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     {
         ThrowIfDisposed();
         _pendingRecordingOptions = options;
-        if (VideoStream is null && AudioStream is null)
-        {
-            return;
-        }
-
+        if (VideoStream is null && AudioStream is null) return;
         StartPendingRecordingIfNeeded();
     }
 
@@ -984,11 +940,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     private void StartPendingRecordingIfNeeded()
     {
         var options = _pendingRecordingOptions;
-        if (options is null || _recording is not null)
-        {
-            return;
-        }
-
+        if (options is null || _recording is not null) return;
         if (VideoStream is null && AudioStream is null)
         {
             throw new InvalidOperationException("No audio or video streams are available for recording.");
@@ -1009,11 +961,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     /// </summary>
     private void CacheRecordingPreroll(AVPacket* packet)
     {
-        if (_source.Kind != MediaSourceKind.File || packet == null || VideoStream is null)
-        {
-            return;
-        }
-
+        if (_source.Kind != MediaSourceKind.File || packet == null || VideoStream is null) return;
         if (packet->stream_index == VideoStream.StreamIndex)
         {
             if ((packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0)
@@ -1022,23 +970,13 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
                 _recordingPrerollVideoKeyUs = PacketTimestampUs(packet, VideoStream.TimeBase);
             }
 
-            if (_recordingPrerollVideoKeyUs is null)
-            {
-                return;
-            }
+            if (_recordingPrerollVideoKeyUs is null) return;
         }
         else if (AudioStream is not null && packet->stream_index == AudioStream.StreamIndex)
         {
-            if (_recordingPrerollVideoKeyUs is null)
-            {
-                return;
-            }
-
+            if (_recordingPrerollVideoKeyUs is null) return;
             var audioTimestampUs = PacketTimestampUs(packet, AudioStream.TimeBase);
-            if (audioTimestampUs is not null && audioTimestampUs < _recordingPrerollVideoKeyUs)
-            {
-                return;
-            }
+            if (audioTimestampUs is not null && audioTimestampUs < _recordingPrerollVideoKeyUs) return;
         }
         else
         {
@@ -1059,14 +997,8 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     /// </summary>
     private void FlushRecordingPreroll(FFmpegPacketRemuxRecorder recording)
     {
-        if (_recordingPrerollPackets.Count == 0)
-        {
-            return;
-        }
-
-        var packets = _recordingPrerollPackets
-            .OrderBy(packet => RecordingPacketTimestampUs(packet.Packet))
-            .ToArray();
+        if (_recordingPrerollPackets.Count == 0) return;
+        var packets = _recordingPrerollPackets.OrderBy(packet => RecordingPacketTimestampUs(packet.Packet)).ToArray();
         _recordingPrerollPackets.Clear();
         _recordingPrerollBytes = 0;
         _recordingPrerollVideoKeyUs = null;
@@ -1166,14 +1098,12 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 将原生时间戳转换为日志文本。
     /// </summary>
-    private static string FormatTimestampValue(long timestamp) =>
-        timestamp == ffmpeg.AV_NOPTS_VALUE ? "-" : timestamp.ToString();
+    private static string FormatTimestampValue(long timestamp) => timestamp == ffmpeg.AV_NOPTS_VALUE ? "-" : timestamp.ToString();
 
     /// <summary>
     /// 将可空时间戳转换为日志文本。
     /// </summary>
-    private static string FormatNullableTimestamp(long? timestamp) =>
-        timestamp?.ToString() ?? "-";
+    private static string FormatNullableTimestamp(long? timestamp) => timestamp?.ToString() ?? "-";
 
     /// <summary>
     /// 根据帧率估算视频包时长。
@@ -1186,9 +1116,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
             fps = RationalToDouble(stream.RealFrameRate);
         }
 
-        return fps > 0 && !double.IsInfinity(fps)
-            ? TimeSpan.FromSeconds(1d / fps)
-            : TimeSpan.FromMilliseconds(33);
+        return fps > 0 && !double.IsInfinity(fps) ? TimeSpan.FromSeconds(1d / fps) : TimeSpan.FromMilliseconds(33);
     }
 
     /// <summary>
@@ -1198,10 +1126,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     {
         var avStream = formatContext->streams[stream.StreamIndex];
         var codecParameters = stream.CodecParameters;
-        if (avStream != null &&
-            avStream->duration > 0 &&
-            codecParameters->sample_rate > 0 &&
-            codecParameters->frame_size > 0)
+        if (avStream != null && avStream->duration > 0 && codecParameters->sample_rate > 0 && codecParameters->frame_size > 0)
         {
             return TimeSpan.FromSeconds(codecParameters->frame_size / (double)codecParameters->sample_rate);
         }
@@ -1214,9 +1139,7 @@ internal sealed unsafe class FFmpegSharedDemuxer : IDisposable
     /// </summary>
     private static double RationalToDouble(AVRational rational)
     {
-        return rational.num > 0 && rational.den > 0
-            ? rational.num / (double)rational.den
-            : 0;
+        return rational.num > 0 && rational.den > 0 ? rational.num / (double)rational.den : 0;
     }
 
     /// <summary>
@@ -1281,8 +1204,7 @@ internal static class DemuxerTaskWaiter
     {
         cancellationToken.ThrowIfCancellationRequested();
         var cancellation = new TaskCompletionSource<bool>();
-        using var registration = cancellationToken.Register(
-            static state => ((TaskCompletionSource<bool>)state!).TrySetCanceled(), cancellation);
+        using var registration = cancellationToken.Register(static state => ((TaskCompletionSource<bool>)state!).TrySetCanceled(), cancellation);
         var completed = await Task.WhenAny(task, cancellation.Task).ConfigureAwait(false);
         await completed.ConfigureAwait(false);
         await task.ConfigureAwait(false);

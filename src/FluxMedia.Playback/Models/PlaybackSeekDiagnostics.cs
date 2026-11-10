@@ -1,7 +1,3 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Errors;
-using FluxMedia.Core.Models;
-
 namespace FluxMedia.Playback;
 
 /// <summary>
@@ -115,5 +111,4 @@ public sealed record PlaybackSeekDiagnosticInfo
 /// <param name="Message">当前事件或操作的说明。</param>
 /// <param name="Position">当前媒体位置。</param>
 /// <param name="Elapsed">当前阶段已经过的时间。</param>
-public sealed record PlaybackSeekTraceEntry(
-    DateTimeOffset Timestamp, long RequestId, string Phase, string Message, TimeSpan? Position = null, TimeSpan? Elapsed = null);
+public sealed record PlaybackSeekTraceEntry(DateTimeOffset Timestamp, long RequestId, string Phase, string Message, TimeSpan? Position = null, TimeSpan? Elapsed = null);

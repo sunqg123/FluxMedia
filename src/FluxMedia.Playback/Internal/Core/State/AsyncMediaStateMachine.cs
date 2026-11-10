@@ -78,10 +78,7 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
         {
             ThrowIfDisposed();
             var previous = State;
-            if (EqualityComparer<TState>.Default.Equals(previous, nextState))
-            {
-                return;
-            }
+            if (EqualityComparer<TState>.Default.Equals(previous, nextState)) return;
             if (!IsTransitionAllowed(previous, nextState))
             {
                 throw new InvalidOperationException($"Invalid {ComponentName} state transition: {previous} -> {nextState}.");
@@ -121,11 +118,7 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
     /// </summary>
     protected void InvokeSubscribersSafely<TEvent>(EventHandler<TEvent>? handlers, TEvent value, string eventName)
     {
-        if (handlers is null)
-        {
-            return;
-        }
-
+        if (handlers is null) return;
         foreach (EventHandler<TEvent> handler in handlers.GetInvocationList())
         {
             try
@@ -134,8 +127,7 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
             }
             catch (Exception ex)
             {
-                FluxMediaLog.Write(
-                    Configuration.LogLevel.Error, ComponentName, InstanceId, $"Event=SubscriberFault SubscriberEvent={eventName} Error={ex.Message}", ex);
+                FluxMediaLog.Write(Configuration.LogLevel.Error, ComponentName, InstanceId, $"Event=SubscriberFault SubscriberEvent={eventName} Error={ex.Message}", ex);
             }
         }
     }
@@ -147,8 +139,7 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
     {
         if (_isDisposed)
         {
-            throw new FluxMediaException(new FluxMediaError(
-                FluxMediaErrorCode.ResourceDisposed, $"{ComponentName} 已释放，不能继续操作。", ComponentName, InstanceId, State.ToString()));
+            throw new FluxMediaException(new FluxMediaError(FluxMediaErrorCode.ResourceDisposed, $"{ComponentName} 已释放，不能继续操作。", ComponentName, InstanceId, State.ToString()));
         }
     }
 

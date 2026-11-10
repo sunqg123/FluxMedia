@@ -35,7 +35,13 @@ public static class FluxEngine
     /// </summary>
     public static bool IsStarted
     {
-        get { lock (SyncRoot) return _options is not null && _shutdownTask is null; }
+        get
+        {
+            lock (SyncRoot)
+            {
+                return _options is not null && _shutdownTask is null;
+            }
+        }
     }
     /// <summary>
     /// 当前日志目录。
@@ -50,7 +56,13 @@ public static class FluxEngine
     /// </summary>
     public static IReadOnlyCollection<Player> Players
     {
-        get { lock (SyncRoot) return Array.AsReadOnly(ActivePlayers.Values.ToArray()); }
+        get
+        {
+            lock (SyncRoot)
+            {
+                return Array.AsReadOnly(ActivePlayers.Values.ToArray());
+            }
+        }
     }
 
     /// <summary>
@@ -218,8 +230,7 @@ public sealed record FluxEngineOptions
             NativeLibraries = new NativeLibraryOptions
             {
                 FFmpegRootDirectory = string.IsNullOrWhiteSpace(explicitNative.FFmpegRootDirectory) ? this.FFmpegPath : explicitNative.FFmpegRootDirectory,
-                AdditionalSearchDirectories = this.FFmpegSearchPaths.Concat(explicitNative.AdditionalSearchDirectories)
-                    .Where(static path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                AdditionalSearchDirectories = this.FFmpegSearchPaths.Concat(explicitNative.AdditionalSearchDirectories).Where(static path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 ThrowOnMissingLibrary = this.ThrowOnMissingFFmpeg || explicitNative.ThrowOnMissingLibrary
             }
         };

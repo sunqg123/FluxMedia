@@ -235,7 +235,6 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice, IPooledAudioOut
                 Interlocked.Add(ref _writtenBytes, length);
                 return;
             }
-
             Thread.Sleep(5);
         }
         // Stop / Dispose 时立即结束等待，避免音频缓冲阻塞播放器退出。

@@ -14,15 +14,12 @@ internal sealed record NativeLibraryDescriptor(string LogicalName, IReadOnlyList
 /// <param name="LoadedPath">实际成功加载的原生库路径。</param>
 /// <param name="IsLoaded">是否成功加载原生库。</param>
 /// <param name="Exception">产生当前错误的原始异常。</param>
-internal sealed record NativeLibraryLoadResult(
-    NativeLibraryDescriptor Descriptor, string? LoadedPath, bool IsLoaded, Exception? Exception = null)
+internal sealed record NativeLibraryLoadResult(NativeLibraryDescriptor Descriptor, string? LoadedPath, bool IsLoaded, Exception? Exception = null)
 {
     /// <summary>
     /// 错误消息。
     /// </summary>
-    public string ErrorMessage => IsLoaded
-        ? string.Empty
-        : Exception?.Message ?? $"未找到原生库：{Descriptor.LogicalName}";
+    public string ErrorMessage => IsLoaded ? string.Empty : Exception?.Message ?? $"未找到原生库：{Descriptor.LogicalName}";
 }
 
 /// <summary>
@@ -33,5 +30,4 @@ internal sealed record NativeLibraryLoadResult(
 /// <param name="Version">已加载 FFmpeg 原生库的版本。</param>
 /// <param name="SearchDirectories">初始化时检查过的原生库目录。</param>
 /// <param name="ErrorMessage">失败原因的文本说明。</param>
-internal sealed record FFmpegInitializeResult(
-    bool IsInitialized, string? RootPath, string? Version, IReadOnlyList<string> SearchDirectories, string? ErrorMessage = null);
+internal sealed record FFmpegInitializeResult(bool IsInitialized, string? RootPath, string? Version, IReadOnlyList<string> SearchDirectories, string? ErrorMessage = null);

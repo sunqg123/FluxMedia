@@ -16,33 +16,23 @@ internal static unsafe class FFmpegMediaInfoReader
     /// </summary>
     internal static MediaInfo BuildMediaInfo(AVFormatContext* formatContext)
     {
-        var duration = formatContext->duration > 0
-            ? TimeSpan.FromSeconds(formatContext->duration / (double)ffmpeg.AV_TIME_BASE)
-            : TimeSpan.Zero;
-
+        var duration = formatContext->duration > 0            ? TimeSpan.FromSeconds(formatContext->duration / (double)ffmpeg.AV_TIME_BASE)            : TimeSpan.Zero;
         var codecs = new List<CodecInfo>();
         var metadata = new Dictionary<string, string>();
         var container = formatContext->iformat == null ? null : PtrToString(formatContext->iformat->name);
         var result = new MediaInfo(duration, codecs, metadata) { ContainerFormat = container };
-
         AVDictionaryEntry* tag = null;
         while ((tag = ffmpeg.av_dict_get(formatContext->metadata, "", tag, ffmpeg.AV_DICT_IGNORE_SUFFIX)) != null)
         {
             metadata[PtrToString(tag->key)] = PtrToString(tag->value);
         }
-
         for (var index = 0; index < formatContext->nb_streams; index++)
         {
             var stream = formatContext->streams[index];
-            if (stream == null || stream->codecpar == null)
-            {
-                continue;
-            }
-
+            if (stream == null || stream->codecpar == null) continue;
             var codecParameters = stream->codecpar;
             var codec = ffmpeg.avcodec_get_name(codecParameters->codec_id);
             codecs.Add(new CodecInfo(codec));
-
             if (codecParameters->codec_type == AVMediaType.AVMEDIA_TYPE_VIDEO && !result.HasVideo)
             {
                 result = result with
@@ -65,7 +55,6 @@ internal static unsafe class FFmpegMediaInfoReader
                 };
             }
         }
-
         return result;
     }
 

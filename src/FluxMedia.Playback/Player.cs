@@ -699,8 +699,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
                 _positionSeconds = args.Position.TotalSeconds;
             }
             _durationSeconds = Math.Max(1, args.Duration?.TotalSeconds ?? 1);
-            RaisePropertiesCore(
-                nameof(Position), nameof(PositionSeconds), nameof(PositionText), nameof(TimeText));
+            RaisePropertiesCore(nameof(Position), nameof(PositionSeconds), nameof(PositionText), nameof(TimeText));
         });
     }
 
@@ -779,8 +778,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         _speed = _session.PlaybackRate;
         _positionSeconds = _session.CurrentTime.TotalSeconds;
         _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
-        RaiseProperties(
-            nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
+        RaiseProperties(nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
     }
 
     /// <summary>
@@ -796,8 +794,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         _speed = _session.PlaybackRate;
         _positionSeconds = _session.CurrentTime.TotalSeconds;
         _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
-        RaiseProperties(
-            nameof(Source), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
+        RaiseProperties(nameof(Source), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
     }
 
     /// <summary>
@@ -836,12 +833,10 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         if (Interlocked.Increment(ref _bindingSeekPending) == 1) RaiseProperties(nameof(IsSeeking));
         try
         {
-            FluxMediaLog.Write(LogLevel.Information, nameof(Player), InstanceId,
-                $"Event=SeekBindingSubmitted TargetSeconds={seconds} IsLive={IsLive}");
+            FluxMediaLog.Write(LogLevel.Information, nameof(Player), InstanceId, $"Event=SeekBindingSubmitted TargetSeconds={seconds} IsLive={IsLive}");
             var result = await SeekAsync(TimeSpan.FromSeconds(seconds), _bindingSeekCts.Token).ConfigureAwait(false);
             if (!result.IsSuccess)
-                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId,
-                    $"Event=SeekBindingFailed TargetSeconds={seconds} Error={result.Error}");
+                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId, $"Event=SeekBindingFailed TargetSeconds={seconds} Error={result.Error}");
         }
         catch (OperationCanceledException) { }
         catch (ObjectDisposedException) when (_disposed) { }

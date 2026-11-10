@@ -122,7 +122,9 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         get
         {
             lock (_sync)
+            {
                 return _currentTime;
+            }
         }
     }
 
@@ -134,7 +136,9 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         get
         {
             lock (_sync)
+            {
                 return _bufferedDuration;
+            }
         }
     }
 
@@ -146,7 +150,9 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         get
         {
             lock (_sync)
+            {
                 return _firstTimestamp;
+            }
         }
     }
 
@@ -158,7 +164,9 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         get
         {
             lock (_sync)
+            {
                 return _lastTimestamp;
+            }
         }
     }
 
@@ -175,8 +183,7 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
     /// <summary>
     /// 设置数据包时间基、默认时长和时间起点。
     /// </summary>
-    public void ConfigureTiming(
-        AVRational timeBase, TimeSpan? fallbackPacketDuration = null, TimeSpan? timestampOrigin = null)
+    public void ConfigureTiming(AVRational timeBase, TimeSpan? fallbackPacketDuration = null, TimeSpan? timestampOrigin = null)
     {
         lock (_sync)
         {
@@ -271,11 +278,7 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
     public bool TryWriteOrdered(FFmpegPacketLease packet)
     {
         ThrowIfDisposed();
-        if (TryWriteOrderedWithoutDrop(packet))
-        {
-            return true;
-        }
-
+        if (TryWriteOrderedWithoutDrop(packet)) return true;
         packet.Dispose();
         Interlocked.Increment(ref _droppedPackets);
         return false;
@@ -289,11 +292,7 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
         lock (_sync)
         {
             ThrowIfDisposed();
-            if (!_channel.Writer.TryWrite(packet))
-            {
-                return false;
-            }
-
+            if (!_channel.Writer.TryWrite(packet)) return false;
             OnPacketEnqueued(packet);
             return true;
         }
@@ -439,20 +438,10 @@ internal sealed unsafe class FFmpegPacketQueue : IDisposable
     /// </summary>
     private TimeSpan? GetPacketTimestamp(FFmpegPacketLease packet)
     {
-        var raw = packet.Packet->dts != ffmpeg.AV_NOPTS_VALUE
-            ? packet.Packet->dts
-            : packet.Packet->pts;
-        if (raw == ffmpeg.AV_NOPTS_VALUE)
-        {
-            return null;
-        }
-
+        var raw = packet.Packet->dts != ffmpeg.AV_NOPTS_VALUE ? packet.Packet->dts : packet.Packet->pts;
+        if (raw == ffmpeg.AV_NOPTS_VALUE) return null;
         var seconds = raw * ffmpeg.av_q2d(_timeBase);
-        if (double.IsNaN(seconds) || double.IsInfinity(seconds))
-        {
-            return null;
-        }
-
+        if (double.IsNaN(seconds) || double.IsInfinity(seconds)) return null;
         var timestamp = TimeSpan.FromSeconds(seconds) - _timestampOrigin;
         return timestamp < TimeSpan.Zero ? TimeSpan.Zero : timestamp;
     }

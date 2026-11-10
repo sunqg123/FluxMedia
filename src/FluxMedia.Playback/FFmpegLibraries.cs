@@ -12,8 +12,7 @@ public static class FFmpegLibraries
     /// <summary>
     /// 当前实际引用的托管绑定程序集版本。
     /// </summary>
-    public static string BindingVersion { get; } =
-        typeof(ffmpeg).Assembly.GetName().Version?.ToString() ?? "未知";
+    public static string BindingVersion { get; } = typeof(ffmpeg).Assembly.GetName().Version?.ToString() ?? "未知";
 
     /// <summary>
     /// 绑定声明的 ABI 主版本，顺序同时作为加载顺序。

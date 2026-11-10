@@ -243,8 +243,7 @@ public static class FluxMediaLog
         {
             throw new ArgumentOutOfRangeException(nameof(options));
         }
-        var next = new LogTarget(options.IsEnabled && options.MinimumLevel != LogLevel.None
-            ? new FileFluxMediaLogSink(options with { MinimumLevel = LogLevel.Trace }) : null);
+        var next = new LogTarget(options.IsEnabled && options.MinimumLevel != LogLevel.None ? new FileFluxMediaLogSink(options with { MinimumLevel = LogLevel.Trace }) : null);
         LogTarget previous;
         long generation;
         lock (ConfigurationGate)
@@ -279,8 +278,7 @@ public static class FluxMediaLog
     private static LogTarget? EnsureTargetLocked()
     {
         if (_target.Sink is not null) return null;
-        var previous = Interlocked.Exchange(ref _target,
-            new LogTarget(new FileFluxMediaLogSink(_fileOptions with { IsEnabled = true, MinimumLevel = LogLevel.Trace })));
+        var previous = Interlocked.Exchange(ref _target, new LogTarget(new FileFluxMediaLogSink(_fileOptions with { IsEnabled = true, MinimumLevel = LogLevel.Trace })));
         _generation++;
         return previous;
     }

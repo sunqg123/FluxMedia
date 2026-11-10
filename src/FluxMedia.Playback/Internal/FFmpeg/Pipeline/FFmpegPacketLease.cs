@@ -42,7 +42,6 @@ internal sealed unsafe class FFmpegPacketLease : IDisposable
             {
                 throw new ObjectDisposedException(nameof(FFmpegPacketLease));
             }
-
             return _packet;
         }
     }
@@ -67,7 +66,6 @@ internal sealed unsafe class FFmpegPacketLease : IDisposable
         {
             throw new InvalidOperationException("FFmpeg packet clone failed.");
         }
-
         return new FFmpegPacketLease(clone, generation);
     }
 
@@ -76,11 +74,7 @@ internal sealed unsafe class FFmpegPacketLease : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
-        {
-            return;
-        }
-
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         var packet = _packet;
         _packet = null;
         if (packet != null)

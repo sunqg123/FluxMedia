@@ -69,8 +69,7 @@ public sealed class VideoFrame : IDisposable
     /// <summary>
     /// 初始化视频帧所需的状态和资源。
     /// </summary>
-    internal VideoFrame(
-        VideoFormat format, IVideoFrameOwner owner, GpuVideoSurface gpuSurface, TimeSpan timestamp, long sequence)
+    internal VideoFrame(VideoFormat format, IVideoFrameOwner owner, GpuVideoSurface gpuSurface, TimeSpan timestamp, long sequence)
     {
         Format = format;
         _owner = owner;

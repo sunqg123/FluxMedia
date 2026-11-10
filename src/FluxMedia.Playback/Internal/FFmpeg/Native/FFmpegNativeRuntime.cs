@@ -37,11 +37,7 @@ internal static unsafe class FFmpegNativeRuntime
     {
         lock (SyncRoot)
         {
-            if (_lastResult?.IsInitialized == true)
-            {
-                return _lastResult;
-            }
-
+            if (_lastResult?.IsInitialized == true) return _lastResult;
             var actualOptions = (options ?? new NativeLibraryOptions());
             var loader = new NativeLibraryLoader(actualOptions);
             var searchDirectories = loader.BuildSearchDirectories();
@@ -54,17 +50,16 @@ internal static unsafe class FFmpegNativeRuntime
                     throw new DirectoryNotFoundException(
                         $"未找到与 FFmpeg.AutoGen {FFmpegLibraries.BindingVersion} 匹配的完整目录。需要：{string.Join(", ", FFmpegLibraries.RequiredFileNames)}。已搜索路径：{string.Join(Path.PathSeparator.ToString(), searchDirectories)}");
                 }
-
                 ffmpeg.RootPath = rootPath;
                 FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegNativeRuntime), Guid.Empty, $"Event=FFmpegRootResolved BindingVersion={FFmpegLibraries.BindingVersion} RootPath={rootPath}");
-
                 LoadRequiredLibraries(loader, rootPath);
                 FFmpegLibraries.ValidateVersions();
                 var networkResult = ffmpeg.avformat_network_init();
                 if (networkResult < 0)
+                {
                     throw new InvalidOperationException($"FFmpeg 网络初始化失败：{networkResult}。");
+                }
                 var version = ffmpeg.av_version_info();
-
                 _lastResult = new FFmpegInitializeResult(true, rootPath, version, searchDirectories);
                 FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegNativeRuntime), Guid.Empty, $"Event=FFmpegInitialized BindingVersion={FFmpegLibraries.BindingVersion} Version={version} RootPath={rootPath}");
                 return _lastResult;
@@ -75,11 +70,7 @@ internal static unsafe class FFmpegNativeRuntime
                 FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegNativeRuntime), Guid.Empty, $"Event=FFmpegInitializeFailed Error={ex.Message}", ex);
                 _lastResult = new FFmpegInitializeResult(false, null, null, searchDirectories, message);
 
-                if (actualOptions.ThrowOnMissingLibrary)
-                {
-                    throw;
-                }
-
+                if (actualOptions.ThrowOnMissingLibrary) throw;
                 return _lastResult;
             }
         }
@@ -132,8 +123,7 @@ internal static unsafe class FFmpegNativeRuntime
     /// <summary>
     /// 查找与当前绑定匹配的完整原生库目录。
     /// </summary>
-    private static string? ResolveFFmpegRoot(IReadOnlyList<string> searchDirectories) =>
-        searchDirectories.FirstOrDefault(FFmpegLibraries.IsAvailable);
+    private static string? ResolveFFmpegRoot(IReadOnlyList<string> searchDirectories) => searchDirectories.FirstOrDefault(FFmpegLibraries.IsAvailable);
 
     /// <summary>
     /// 从同一目录按依赖顺序加载原生库，避免混用构建。

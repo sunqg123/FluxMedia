@@ -21,8 +21,7 @@ internal static class NativeLibraryCompat
     /// <summary>
     /// 进程内按绝对路径共享的动态库句柄。
     /// </summary>
-    private static readonly Dictionary<string, IntPtr> Handles = new(
-        RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private static readonly Dictionary<string, IntPtr> Handles = new(RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
     /// <summary>
     /// 同步锁。

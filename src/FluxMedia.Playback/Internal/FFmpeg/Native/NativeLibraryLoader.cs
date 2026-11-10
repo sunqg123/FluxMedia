@@ -33,18 +33,15 @@ internal sealed class NativeLibraryLoader
     public IReadOnlyList<string> BuildSearchDirectories()
     {
         var directories = new List<string>();
-
         if (!string.IsNullOrWhiteSpace(_options.FFmpegRootDirectory))
         {
             directories.Add(_options.FFmpegRootDirectory);
         }
-
         var environmentRoot = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT");
         if (!string.IsNullOrWhiteSpace(environmentRoot))
         {
             directories.Add(environmentRoot);
         }
-
         directories.AddRange(_options.AdditionalSearchDirectories.Where(static item => !string.IsNullOrWhiteSpace(item)));
         directories.Add(AppContext.BaseDirectory);
         var runtimeIdentifier = GetRuntimeIdentifier();
@@ -72,7 +69,6 @@ internal sealed class NativeLibraryLoader
             {
                 lastCandidate = candidate;
                 FluxMediaLog.Write(LogLevel.Debug, nameof(NativeLibraryLoader), _instanceId, $"Event=NativeLibrarySearch Path={candidate}");
-
                 try
                 {
                     NativeLibraryCompat.Load(candidate);
@@ -90,15 +86,18 @@ internal sealed class NativeLibraryLoader
         if (lastError is not null)
         {
             if (_options.ThrowOnMissingLibrary)
+            {
                 throw new InvalidOperationException($"所有候选路径均无法加载 {descriptor.LogicalName}。", lastError);
+            }
             return new NativeLibraryLoadResult(descriptor, lastCandidate, false, lastError);
         }
 
         var searchText = string.Join(Path.PathSeparator.ToString(), directories);
         if (_options.ThrowOnMissingLibrary)
+        {
             throw new FileNotFoundException($"未找到原生库 {descriptor.LogicalName}。已搜索路径：{searchText}");
-        return new NativeLibraryLoadResult(
-            descriptor, null, false, new FileNotFoundException($"未找到原生库 {descriptor.LogicalName}。已搜索路径：{searchText}"));
+        }
+        return new NativeLibraryLoadResult(descriptor, null, false, new FileNotFoundException($"未找到原生库 {descriptor.LogicalName}。已搜索路径：{searchText}"));
     }
 
     /// <summary>
@@ -136,11 +135,7 @@ internal sealed class NativeLibraryLoader
     /// </summary>
     private static string GetRuntimeIdentifier()
     {
-        var os = RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-            ? "win"
-            : RuntimeInformation.IsOSPlatform(OSPlatform.OSX)
-                ? "osx"
-                : "linux";
+        var os = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? "win" : RuntimeInformation.IsOSPlatform(OSPlatform.OSX) ? "osx" : "linux";
         var architecture = RuntimeInformation.ProcessArchitecture switch
         {
             Architecture.X64 => "x64",

@@ -67,8 +67,7 @@ internal sealed class PlaybackSeekFrame
         elapsed = DateTimeOffset.UtcNow - StartedAt;
         lock (_sync)
         {
-            return _epoch is not null && frame.IsCurrent && frame.IsFromEpoch(_epoch) &&
-                frame.Timestamp + TimeSpan.FromMilliseconds(40) >= Target && _completion.TrySetResult(frame.Timestamp);
+            return _epoch is not null && frame.IsCurrent && frame.IsFromEpoch(_epoch) && frame.Timestamp + TimeSpan.FromMilliseconds(40) >= Target && _completion.TrySetResult(frame.Timestamp);
         }
     }
 }

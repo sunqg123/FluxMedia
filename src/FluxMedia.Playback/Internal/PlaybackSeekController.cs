@@ -133,8 +133,7 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
         lock (_sync)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(PlaybackSeekController));
-            var request = new SeekRequest(target, resumePlaying, ++_nextId,
-                _pending?.FirstQueuedAt ?? DateTimeOffset.UtcNow, (_pending?.Count ?? 0) + 1, operationToken);
+            var request = new SeekRequest(target, resumePlaying, ++_nextId, _pending?.FirstQueuedAt ?? DateTimeOffset.UtcNow, (_pending?.Count ?? 0) + 1, operationToken);
             _pending = request;
             _pendingCompletion ??= new TaskCompletionSource<PlaybackResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             var completion = _pendingCompletion.Task;
@@ -290,9 +289,7 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
             next = TimeSpan.FromMilliseconds(Math.Min(MaxSeekCoalesceDelay.TotalMilliseconds, next.TotalMilliseconds + 20));
             strategy = slowFirstUi ? "FirstUiRecovery" : slowDemux ? "DemuxBackoff" : recovered ? "RecoveryBackoff" : "FullRestartBackoff";
         }
-        else if (string.Equals(seek.Path, "Demuxer", StringComparison.OrdinalIgnoreCase) &&
-            seek.CoalescedRequestCount <= 1 &&
-            seek.TotalElapsed <= TimeSpan.FromMilliseconds(180))
+        else if (string.Equals(seek.Path, "Demuxer", StringComparison.OrdinalIgnoreCase) && seek.CoalescedRequestCount <= 1 && seek.TotalElapsed <= TimeSpan.FromMilliseconds(180))
         {
             next = TimeSpan.FromMilliseconds(Math.Max(MinSeekCoalesceDelay.TotalMilliseconds, next.TotalMilliseconds - 10));
             strategy = "Responsive";

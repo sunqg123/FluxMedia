@@ -21,7 +21,9 @@ internal static class FFmpegPacketReader
             }
 
             while (!isDisposed() && !cancellationToken.IsCancellationRequested && packets.TryRead(out var packet))
+            {
                 yield return packet;
+            }
         }
     }
 }

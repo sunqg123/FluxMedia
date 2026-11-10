@@ -197,8 +197,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     /// <summary>
     /// 初始化播放会话所需的状态和资源。
     /// </summary>
-    public PlaybackSession(PlaybackOptions? defaultOptions = null)
-        : base(PlaybackState.Created, nameof(PlaybackSession))
+    public PlaybackSession(PlaybackOptions? defaultOptions = null) : base(PlaybackState.Created, nameof(PlaybackSession))
     {
         _defaultOptions = defaultOptions ?? new PlaybackOptions();
         _currentOptions = _defaultOptions;
@@ -276,8 +275,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     /// <summary>
     /// 由核心统一提供的跳转权限，跳转过程中仍可提交新目标。
     /// </summary>
-    public bool CanSeek => !IsDisposed && State is not PlaybackState.Created and not PlaybackState.Opening
-        and not PlaybackState.Stopping and not PlaybackState.Disposed and not PlaybackState.Failed && CanSeekCurrentSource();
+    public bool CanSeek => !IsDisposed && State is not PlaybackState.Created and not PlaybackState.Opening and not PlaybackState.Stopping and not PlaybackState.Disposed and not PlaybackState.Failed && CanSeekCurrentSource();
 
     /// <summary>
     /// 播放速度。
@@ -704,8 +702,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     /// </summary>
     private async Task RestorePostSeekStateAsync(bool resumePlaying)
     {
-        if (State is PlaybackState.Stopping or PlaybackState.Stopped or PlaybackState.Disposed ||
-            _operationCts?.IsCancellationRequested == true)
+        if (State is PlaybackState.Stopping or PlaybackState.Stopped or PlaybackState.Disposed || _operationCts?.IsCancellationRequested == true)
         {
             return;
         }
@@ -715,8 +712,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
         _seekResumePlayingIntent = resumePlaying;
         if (State == PlaybackState.Seeking)
         {
-            await TransitionAsync(
-                resumePlaying ? PlaybackState.Playing : PlaybackState.Paused, CancellationToken.None).ConfigureAwait(false);
+            await TransitionAsync(resumePlaying ? PlaybackState.Playing : PlaybackState.Paused, CancellationToken.None).ConfigureAwait(false);
         }
 
         FluxMediaLog.Write(
@@ -1204,8 +1200,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
             await _pipelineMutationGate.WaitAsync(operationToken).ConfigureAwait(false);
             gateEntered = true;
             // 获取锁后重新校验，防止旧管线重复恢复或覆盖新媒体。
-            if (!ReferenceEquals(_pipeline, failedPipeline) || !ReferenceEquals(_operationCts, operation) ||
-                IsDisposed || State is PlaybackState.Stopping or PlaybackState.Stopped or PlaybackState.Disposed or PlaybackState.Failed)
+            if (!ReferenceEquals(_pipeline, failedPipeline) || !ReferenceEquals(_operationCts, operation) || IsDisposed || State is PlaybackState.Stopping or PlaybackState.Stopped or PlaybackState.Disposed or PlaybackState.Failed)
                 return;
 
             while (_currentOptions.Network.ReconnectEnabled &&
@@ -1472,8 +1467,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     /// </summary>
     private FluxMediaError CreateError(PlaybackError playbackError, string message)
     {
-        return new FluxMediaError(
-            playbackError == PlaybackError.ResourceDisposed ? FluxMediaErrorCode.ResourceDisposed : FluxMediaErrorCode.InvalidState, message, ComponentName, InstanceId, State.ToString(), CurrentSource?.Uri);
+        return new FluxMediaError(playbackError == PlaybackError.ResourceDisposed ? FluxMediaErrorCode.ResourceDisposed : FluxMediaErrorCode.InvalidState, message, ComponentName, InstanceId, State.ToString(), CurrentSource?.Uri);
     }
 
     /// <summary>

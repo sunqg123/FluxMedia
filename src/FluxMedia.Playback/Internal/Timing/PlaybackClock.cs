@@ -14,5 +14,4 @@ internal static class PlaybackClock
     {
         return TimeSpan.FromSeconds((Stopwatch.GetTimestamp() - startedAt) / (double)Stopwatch.Frequency);
     }
-
 }

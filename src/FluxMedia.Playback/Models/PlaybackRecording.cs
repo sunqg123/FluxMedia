@@ -1,7 +1,3 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Errors;
-using FluxMedia.Core.Models;
-
 namespace FluxMedia.Playback;
 
 /// <summary>

@@ -787,9 +787,13 @@ internal sealed class OpenALPlaybackOutput : IAudioOutputDevice, IPooledAudioOut
         internal static void AlSourceQueueBuffers(uint source, int count, ref uint buffer)
         {
             if (IsMacOS)
+            {
                 MacOS.AlSourceQueueBuffers(source, count, ref buffer);
+            }
             else
+            {
                 Linux.AlSourceQueueBuffers(source, count, ref buffer);
+            }
         }
 
         /// <summary>

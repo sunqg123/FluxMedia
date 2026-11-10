@@ -171,14 +171,12 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
         if (_processor is null || _processorWidth != frame->width || _processorHeight != frame->height)
         {
             _processor?.Dispose();
-            _processor = new D3D11VideoProcessor(
-                _device.Handle, _deviceContext.Handle, frame->width, frame->height, format.FramesPerSecond);
+            _processor = new D3D11VideoProcessor(_device.Handle, _deviceContext.Handle, frame->width, frame->height, format.FramesPerSecond);
             _processorWidth = frame->width;
             _processorHeight = frame->height;
         }
         var owner = _processor.Convert(texture, arraySlice);
-        var surface = new D3D11SharedTextureSurface(
-            owner.SharedHandle, frame->width, frame->height, PixelFormat.Bgra32, AcquireKey: 1, ReleaseKey: 0);
+        var surface = new D3D11SharedTextureSurface(owner.SharedHandle, frame->width, frame->height, PixelFormat.Bgra32, AcquireKey: 1, ReleaseKey: 0);
         return new VideoFrame(
             format with
             {
@@ -225,8 +223,7 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
         var result = ffmpeg.av_hwdevice_ctx_init(_hardwareDevice);
         if (result < 0)
         {
-            throw new InvalidOperationException(
-                $"FFmpeg D3D11VA device initialization failed: {FFmpegErrorHelper.GetErrorMessage(result)}");
+            throw new InvalidOperationException($"FFmpeg D3D11VA device initialization failed: {FFmpegErrorHelper.GetErrorMessage(result)}");
         }
     }
 
@@ -270,8 +267,7 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
     /// <summary>
     /// 创建硬件解码所需的图形设备。
     /// </summary>
-    private static void CreateDevice(
-        byte[]? preferredAdapterLuid, out ComPtr<D3DDevice> device, out ComPtr<D3DDeviceContext> deviceContext, out string adapterDescription)
+    private static void CreateDevice(byte[]? preferredAdapterLuid, out ComPtr<D3DDevice> device, out ComPtr<D3DDeviceContext> deviceContext, out string adapterDescription)
     {
         using var dxgi = new DXGI(DXGI.CreateDefaultContext(["DXGI.dll"]));
         using var d3d11 = new D3D11(D3D11.CreateDefaultContext(["d3d11.dll"]));
@@ -289,8 +285,7 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
         device = default;
         deviceContext = default;
         D3DFeatureLevel actualFeatureLevel;
-        ThrowHResult(d3d11.CreateDevice(
-            adapter, D3DDriverType.Unknown, IntPtr.Zero, (uint)(CreateDeviceFlag.VideoSupport | CreateDeviceFlag.BgraSupport), featureLevels, 4, D3D11.SdkVersion, device.GetAddressOf(), &actualFeatureLevel, deviceContext.GetAddressOf()));
+        ThrowHResult(d3d11.CreateDevice(adapter, D3DDriverType.Unknown, IntPtr.Zero, (uint)(CreateDeviceFlag.VideoSupport | CreateDeviceFlag.BgraSupport), featureLevels, 4, D3D11.SdkVersion, device.GetAddressOf(), &actualFeatureLevel, deviceContext.GetAddressOf()));
 
         AdapterDesc description;
         ThrowHResult(adapter.GetDesc(&description));
@@ -300,8 +295,7 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
     /// <summary>
     /// 选择与显示端匹配的图形适配器。
     /// </summary>
-    private static ComPtr<IDXGIAdapter> SelectAdapter(
-        ComPtr<IDXGIFactory1> factory, byte[]? preferredAdapterLuid)
+    private static ComPtr<IDXGIAdapter> SelectAdapter(ComPtr<IDXGIFactory1> factory, byte[]? preferredAdapterLuid)
     {
         for (uint index = 0; ; index++)
         {
@@ -412,8 +406,7 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     /// <summary>
     /// 初始化 D3D11 视频处理器所需的状态和资源。
     /// </summary>
-    public D3D11VideoProcessor(
-        D3DDevice* device, D3DDeviceContext* deviceContext, int width, int height, double frameRate)
+    public D3D11VideoProcessor(D3DDevice* device, D3DDeviceContext* deviceContext, int width, int height, double frameRate)
     {
         _device = device;
         _deviceContext = deviceContext;
@@ -466,8 +459,7 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
                 Texture2D = new Tex2DVpiv(0, arraySlice)
             };
             ComPtr<ID3D11VideoProcessorInputView> inputView = default;
-            ThrowHResult(_videoDevice.CreateVideoProcessorInputView(
-                (ID3D11Resource*)inputTexture, _enumerator, &inputDescription, inputView.GetAddressOf()));
+            ThrowHResult(_videoDevice.CreateVideoProcessorInputView((ID3D11Resource*)inputTexture, _enumerator, &inputDescription, inputView.GetAddressOf()));
             using (inputView)
             {
                 var stream = new VideoProcessorStream
@@ -475,8 +467,7 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
                     Enable = new Bool32(true),
                     PInputSurface = inputView
                 };
-                ThrowHResult(_videoContext.VideoProcessorBlt(
-                    _processor, surface.OutputView, 0, 1, &stream));
+                ThrowHResult(_videoContext.VideoProcessorBlt(_processor, surface.OutputView, 0, 1, &stream));
                 _deviceContext->Flush();
             }
 
@@ -572,8 +563,7 @@ internal sealed unsafe class D3D11SharedSurface : IDisposable
     /// <summary>
     /// 初始化 D3D11 共享表面所需的状态和资源。
     /// </summary>
-    public D3D11SharedSurface(
-        D3DDevice* device, ComPtr<D3DVideoDevice> videoDevice, ComPtr<ID3D11VideoProcessorEnumerator> enumerator, int width, int height)
+    public D3D11SharedSurface(D3DDevice* device, ComPtr<D3DVideoDevice> videoDevice, ComPtr<ID3D11VideoProcessorEnumerator> enumerator, int width, int height)
     {
         var description = new Texture2DDesc
         {
@@ -590,8 +580,7 @@ internal sealed unsafe class D3D11SharedSurface : IDisposable
         };
 
         ComPtr<D3DTexture2D> texture = default;
-        ThrowHResult(device->CreateTexture2D(
-            &description, (SubresourceData*)null, texture.GetAddressOf()));
+        ThrowHResult(device->CreateTexture2D(&description, (SubresourceData*)null, texture.GetAddressOf()));
         _texture = texture;
         _mutex = _texture.QueryInterface<IDXGIKeyedMutex>();
 
@@ -606,8 +595,7 @@ internal sealed unsafe class D3D11SharedSurface : IDisposable
             Texture2D = new Tex2DVpov(0)
         };
         ComPtr<ID3D11VideoProcessorOutputView> outputView = default;
-        ThrowHResult(videoDevice.CreateVideoProcessorOutputView(
-            (ID3D11Resource*)_texture.Handle, enumerator, &outputDescription, outputView.GetAddressOf()));
+        ThrowHResult(videoDevice.CreateVideoProcessorOutputView((ID3D11Resource*)_texture.Handle, enumerator, &outputDescription, outputView.GetAddressOf()));
         _outputView = outputView;
     }
 
@@ -713,8 +701,7 @@ internal sealed class D3D11GpuFrameOwner : IVideoFrameOwner
     /// <summary>
     /// 共享句柄。
     /// </summary>
-    public nint SharedHandle => _surface?.SharedHandle
-        ?? throw new ObjectDisposedException(nameof(D3D11GpuFrameOwner));
+    public nint SharedHandle => _surface?.SharedHandle ?? throw new ObjectDisposedException(nameof(D3D11GpuFrameOwner));
 
     /// <summary>
     /// 增加底层资源的持有引用。
@@ -729,10 +716,7 @@ internal sealed class D3D11GpuFrameOwner : IVideoFrameOwner
                 throw new ObjectDisposedException(nameof(D3D11GpuFrameOwner));
             }
 
-            if (Interlocked.CompareExchange(ref _referenceCount, current + 1, current) == current)
-            {
-                return;
-            }
+            if (Interlocked.CompareExchange(ref _referenceCount, current + 1, current) == current) return;
         }
     }
 
@@ -741,11 +725,7 @@ internal sealed class D3D11GpuFrameOwner : IVideoFrameOwner
     /// </summary>
     public void Release()
     {
-        if (Interlocked.Decrement(ref _referenceCount) != 0)
-        {
-            return;
-        }
-
+        if (Interlocked.Decrement(ref _referenceCount) != 0) return;
         var pool = Interlocked.Exchange(ref _pool, null);
         var surface = Interlocked.Exchange(ref _surface, null);
         if (pool is not null && surface is not null)

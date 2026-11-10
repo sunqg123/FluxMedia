@@ -109,8 +109,7 @@ internal sealed class PlaybackScheduler
     /// <summary>
     /// 初始化播放调度器所需的状态和资源。
     /// </summary>
-    public PlaybackScheduler(
-        PlaybackTimingMode timingMode, Func<double> playbackRate, Func<bool> shouldStop, Func<AudioPlaybackDiagnostics?>? audioDiagnostics = null, Func<TimeSpan>? videoBufferedDuration = null, Func<int>? videoBufferedPacketCount = null, TimeSpan? minBufferDuration = null, TimeSpan? maxLowLatencyDelay = null)
+    public PlaybackScheduler(PlaybackTimingMode timingMode, Func<double> playbackRate, Func<bool> shouldStop, Func<AudioPlaybackDiagnostics?>? audioDiagnostics = null, Func<TimeSpan>? videoBufferedDuration = null, Func<int>? videoBufferedPacketCount = null, TimeSpan? minBufferDuration = null, TimeSpan? maxLowLatencyDelay = null)
     {
         _timingMode = timingMode;
         _playbackRate = playbackRate;
@@ -203,8 +202,7 @@ internal sealed class PlaybackScheduler
     /// <summary>
     /// 等待当前视频帧到达应显示的时间。
     /// </summary>
-    public void WaitForVideoFrame(TimeSpan timestamp, TimeSpan fallbackFrameInterval, CancellationToken cancellationToken)
-        => ScheduleVideoFrame(timestamp, fallbackFrameInterval, cancellationToken);
+    public void WaitForVideoFrame(TimeSpan timestamp, TimeSpan fallbackFrameInterval, CancellationToken cancellationToken) => ScheduleVideoFrame(timestamp, fallbackFrameInterval, cancellationToken);
 
     /// <summary>
     /// 根据媒体时间和播放速度计算显示等待。
@@ -230,10 +228,7 @@ internal sealed class PlaybackScheduler
     private TimeSpan? GetAudioClock()
     {
         var audio = _audioDiagnostics();
-        if (audio?.PresentationTime is null ||
-            audio.WorkerState != "Running" ||
-            audio.OutputBufferedDuration is null ||
-            audio.OutputBufferedDuration <= TimeSpan.Zero)
+        if (audio?.PresentationTime is null || audio.WorkerState != "Running" || audio.OutputBufferedDuration is null || audio.OutputBufferedDuration <= TimeSpan.Zero)
         {
             return null;
         }
@@ -241,16 +236,13 @@ internal sealed class PlaybackScheduler
         _audioRate = PlaybackRatePolicy.Normalize(audio.PlaybackRate);
         var buffered = audio.OutputBufferedDuration ?? TimeSpan.Zero;
         var deviceDelay = audio.OutputDeviceDelay ?? TimeSpan.Zero;
-        var elapsed = audio.UpdatedAt == default
-            ? TimeSpan.Zero
-            : DateTimeOffset.UtcNow - audio.UpdatedAt;
+        var elapsed = audio.UpdatedAt == default ? TimeSpan.Zero : DateTimeOffset.UtcNow - audio.UpdatedAt;
         if (elapsed < TimeSpan.Zero || elapsed > TimeSpan.FromSeconds(2))
         {
             elapsed = TimeSpan.Zero;
         }
 
-        var clock = audio.PresentationTime.Value + TimeSpan.FromTicks((long)(
-            Math.Min(elapsed.TotalSeconds, (buffered + deviceDelay).TotalSeconds) * TimeSpan.TicksPerSecond * _audioRate));
+        var clock = audio.PresentationTime.Value + TimeSpan.FromTicks((long)(Math.Min(elapsed.TotalSeconds, (buffered + deviceDelay).TotalSeconds) * TimeSpan.TicksPerSecond * _audioRate));
         return clock < TimeSpan.Zero ? TimeSpan.Zero : clock;
     }
 
@@ -319,5 +311,4 @@ internal enum VideoFrameSchedulingAction
 /// <param name="AudioClock">估算的当前音频播放时间。</param>
 /// <param name="VideoBufferedDuration">视频队列中剩余的缓冲时长。</param>
 /// <param name="LowLatencyCatchUp">是否正在通过丢帧追赶实时进度。</param>
-internal readonly record struct VideoFrameSchedulingDecision(
-    VideoFrameSchedulingAction Action, TimeSpan Waited, TimeSpan? DistanceToAudio, TimeSpan? AudioClock, TimeSpan VideoBufferedDuration, bool LowLatencyCatchUp);
+internal readonly record struct VideoFrameSchedulingDecision(VideoFrameSchedulingAction Action, TimeSpan Waited, TimeSpan? DistanceToAudio, TimeSpan? AudioClock, TimeSpan VideoBufferedDuration, bool LowLatencyCatchUp);

@@ -72,8 +72,7 @@ internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
             };
             context = created;
             AVBufferRef* hardwareDevice = null;
-            var result = ffmpeg.av_hwdevice_ctx_create(
-                &hardwareDevice, AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI, null, null, 0);
+            var result = ffmpeg.av_hwdevice_ctx_create(&hardwareDevice, AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI, null, null, 0);
             created._hardwareDevice = hardwareDevice;
             if (result < 0)
             {

@@ -14,7 +14,6 @@ internal static class PlaybackPacer
         {
             return TimeSpan.Zero;
         }
-
         firstMediaTimestamp ??= timestamp;
         presentationStartedAt ??= now;
         var rate = PlaybackRatePolicy.Normalize(playbackRate);
@@ -24,7 +23,6 @@ internal static class PlaybackPacer
         {
             return TimeSpan.Zero;
         }
-
         return delay > TimeSpan.FromMilliseconds(250) ? fallbackFrameInterval : delay;
     }
 }

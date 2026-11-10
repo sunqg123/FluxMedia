@@ -59,13 +59,20 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
             try
             {
                 if (codec->ch_layout.order == AVChannelOrder.AV_CHANNEL_ORDER_UNSPEC)
+                {
                     ffmpeg.av_channel_layout_default(&inputLayout, Math.Max(1, codec->ch_layout.nb_channels));
+                }
                 else
+                {
                     FFmpegErrorHelper.ThrowIfError(ffmpeg.av_channel_layout_copy(&inputLayout, &codec->ch_layout), "audio channel layout copy");
+                }
                 FFmpegErrorHelper.ThrowIfError(ffmpeg.av_channel_layout_describe(&inputLayout, layout, 256), "audio channel layout");
                 layoutName = Marshal.PtrToStringAnsi((nint)layout);
             }
-            finally { ffmpeg.av_channel_layout_uninit(&inputLayout); }
+            finally
+            {
+                ffmpeg.av_channel_layout_uninit(&inputLayout);
+            }
             var format = ffmpeg.av_get_sample_fmt_name(codec->sample_fmt);
             _source = Create("abuffer", "input", $"time_base=1/{sampleRate}:sample_rate={sampleRate}:sample_fmt={format}:channel_layout={layoutName}");
             var tempo = Create("atempo", "tempo", rate.ToString(CultureInfo.InvariantCulture));
@@ -124,8 +131,14 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
             var result = ffmpeg.av_buffersink_get_frame(_sink, _output);
             if (result == ffmpeg.AVERROR(ffmpeg.EAGAIN) || result == ffmpeg.AVERROR_EOF) return;
             FFmpegErrorHelper.ThrowIfError(result, "audio filter output");
-            try { consume(new ReadOnlySpan<byte>(_output->data[0], checked(_output->nb_samples * _channels * sizeof(short))), _output->nb_samples, _rate); }
-            finally { ffmpeg.av_frame_unref(_output); }
+            try
+            {
+                consume(new ReadOnlySpan<byte>(_output->data[0], checked(_output->nb_samples * _channels * sizeof(short))), _output->nb_samples, _rate);
+            }
+            finally
+            {
+                ffmpeg.av_frame_unref(_output);
+            }
         }
     }
 

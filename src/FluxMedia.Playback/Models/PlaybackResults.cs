@@ -1,6 +1,4 @@
-using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Errors;
-using FluxMedia.Core.Models;
 
 namespace FluxMedia.Playback;
 
@@ -80,8 +78,7 @@ public sealed class PlaybackException : Exception
     /// <summary>
     /// 初始化播放异常所需的状态和资源。
     /// </summary>
-    public PlaybackException(PlaybackError playbackError, FluxMediaError error, Exception? innerException = null)
-        : base(error.Message, innerException)
+    public PlaybackException(PlaybackError playbackError, FluxMediaError error, Exception? innerException = null) : base(error.Message, innerException)
     {
         PlaybackError = playbackError;
         Error = error;

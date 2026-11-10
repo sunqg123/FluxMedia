@@ -56,7 +56,11 @@ internal sealed class PlaybackVideoFrameHub
         long count;
         lock (_sync)
         {
-            if (!frame.IsCurrent) { RecordDrop(); return; }
+            if (!frame.IsCurrent)
+            {
+                RecordDrop();
+                return;
+            }
             count = Interlocked.Increment(ref _outputFrameCount);
             if (_output is not null)
             {
@@ -105,8 +109,17 @@ internal sealed class PlaybackVideoFrameHub
             });
         await foreach (var lease in output.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
         {
-            try { if (lease.Frame.IsCurrent) yield return lease.Frame; }
-            finally { lease.Dispose(); }
+            try
+            {
+                if (lease.Frame.IsCurrent)
+                {
+                    yield return lease.Frame;
+                }
+            }
+            finally
+            {
+                lease.Dispose();
+            }
         }
     }
 }
