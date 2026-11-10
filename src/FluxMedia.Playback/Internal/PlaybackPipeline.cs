@@ -138,8 +138,8 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
         {
             _audioOutput = AudioOutputDeviceFactory.Create(_instanceId);
             _audio = new FFmpegPacketAudioPlaybackWorker(_source, _instanceId, _startPosition, Demuxer.AudioStream, Demuxer.AudioPackets, () => Demuxer.PacketGeneration,
-                _audioOutput, _callbacks.IsPaused, _callbacks.Volume, _callbacks.IsMuted, UpdateAudioDiagnostics,
-                _callbacks.Resync, packet => Demuxer.WriteRecordingPacket(packet), _callbacks.PlaybackRate);
+                _audioOutput, _callbacks.IsPaused, _callbacks.PlaybackRate, _callbacks.Volume, _callbacks.IsMuted, UpdateAudioDiagnostics,
+                _callbacks.Resync, packet => Demuxer.WriteRecordingPacket(packet));
         }
         _video = new FFmpegPacketVideoPlaybackWorker(_source, _options, _instanceId, _startPosition, Demuxer.VideoStream, Demuxer.VideoPackets, () => Demuxer.PacketGeneration,
             _frames.Queue, _callbacks.IsPaused, _callbacks.PlaybackRate, _callbacks.VideoDiagnostics,

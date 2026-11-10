@@ -53,7 +53,7 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
             _output = ffmpeg.av_frame_alloc();
             if (_graph == null || _output == null) throw new OutOfMemoryException("无法创建音频变速器。");
             _graph->nb_threads = 1;
-            var layout = stackalloc byte[256];
+            byte* layout = stackalloc byte[256];
             AVChannelLayout inputLayout = default;
             string? layoutName;
             try

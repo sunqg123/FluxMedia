@@ -202,7 +202,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
     {
         _defaultOptions = defaultOptions ?? new PlaybackOptions();
         _currentOptions = _defaultOptions;
-        _playbackRate = NormalizePlaybackRate(_defaultOptions.InitialPlaybackRate);
+        _playbackRate = PlaybackRatePolicy.Normalize(_defaultOptions.InitialPlaybackRate);
         _volume = Math.Clamp(_defaultOptions.InitialVolume, 0, 1);
         _isMuted = _defaultOptions.InitialMuted;
         _videoFrames = new PlaybackVideoFrameHub();
@@ -393,7 +393,7 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
                 await pipeline.PrepareAsync(open.Token).ConfigureAwait(false);
                 CurrentMediaInfo = pipeline.Demuxer.MediaInfo ?? throw new InvalidOperationException("未读取到媒体信息。");
                 if (!CurrentMediaInfo.HasVideo) throw new InvalidOperationException("当前媒体没有视频流。");
-                Volatile.Write(ref _playbackRate, CanSeekCurrentSource() ? NormalizePlaybackRate(_currentOptions.InitialPlaybackRate) : 1.0);
+                Volatile.Write(ref _playbackRate, CanSeekCurrentSource() ? PlaybackRatePolicy.Normalize(_currentOptions.InitialPlaybackRate) : 1.0);
                 if (pipeline.Demuxer.OpenDiagnostic is not null) UpdateOpenDiagnostics(pipeline.Demuxer.OpenDiagnostic);
                 await TransitionAsync(PlaybackState.Ready, cancellationToken).ConfigureAwait(false);
                 MarkLifecycle("OpenCompleted");
@@ -1543,14 +1543,6 @@ internal sealed class PlaybackSession : AsyncMediaStateMachine<PlaybackState>, I
         _lastControlError = message;
         FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=PlaybackControlFailed Error={error} Message={message} State={State} SourceKind={CurrentSource?.Kind} Source={CurrentSource?.Uri}");
         return PlaybackResult.Failure(error, message);
-    }
-
-    /// <summary>
-    /// 将无效播放速度转换为有效值。
-    /// </summary>
-    private static double NormalizePlaybackRate(double rate)
-    {
-        return PlaybackRatePolicy.IsSupported(rate) ? rate : 1.0;
     }
 
     /// <summary>

@@ -212,7 +212,7 @@ internal sealed class PlaybackScheduler
     private TimeSpan CalculatePresentationDelay(TimeSpan timestamp, TimeSpan fallbackFrameInterval)
     {
         var now = DateTimeOffset.UtcNow;
-        var rate = PlaybackPacer.ClampPlaybackRate(_playbackRate());
+        var rate = PlaybackRatePolicy.Normalize(_playbackRate());
         if (rate != _clockRate && _firstMediaTimestamp is not null && _presentationStartedAt is not null)
         {
             // 从当前媒体位置重新锚定，避免变速后突然跳帧。
@@ -230,7 +230,7 @@ internal sealed class PlaybackScheduler
     private TimeSpan? GetAudioClock()
     {
         var audio = _audioDiagnostics();
-        if (audio?.CurrentTime is null ||
+        if (audio?.PresentationTime is null ||
             audio.WorkerState != "Running" ||
             audio.OutputBufferedDuration is null ||
             audio.OutputBufferedDuration <= TimeSpan.Zero)
@@ -238,7 +238,7 @@ internal sealed class PlaybackScheduler
             return null;
         }
 
-        _audioRate = PlaybackPacer.ClampPlaybackRate(audio.PlaybackRate);
+        _audioRate = PlaybackRatePolicy.Normalize(audio.PlaybackRate);
         var buffered = audio.OutputBufferedDuration ?? TimeSpan.Zero;
         var deviceDelay = audio.OutputDeviceDelay ?? TimeSpan.Zero;
         var elapsed = audio.UpdatedAt == default
@@ -249,9 +249,8 @@ internal sealed class PlaybackScheduler
             elapsed = TimeSpan.Zero;
         }
 
-        var clock = audio.PresentationTime is { } presentation
-            ? presentation + TimeSpan.FromTicks((long)(Math.Min(elapsed.TotalSeconds, (buffered + deviceDelay).TotalSeconds) * TimeSpan.TicksPerSecond * _audioRate))
-            : audio.CurrentTime.Value - buffered - deviceDelay + elapsed;
+        var clock = audio.PresentationTime.Value + TimeSpan.FromTicks((long)(
+            Math.Min(elapsed.TotalSeconds, (buffered + deviceDelay).TotalSeconds) * TimeSpan.TicksPerSecond * _audioRate));
         return clock < TimeSpan.Zero ? TimeSpan.Zero : clock;
     }
 
@@ -262,7 +261,7 @@ internal sealed class PlaybackScheduler
     {
         _firstMediaTimestamp = null;
         _presentationStartedAt = null;
-        _clockRate = PlaybackPacer.ClampPlaybackRate(_playbackRate());
+        _clockRate = PlaybackRatePolicy.Normalize(_playbackRate());
     }
 
     /// <summary>

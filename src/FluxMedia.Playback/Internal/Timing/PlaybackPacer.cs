@@ -17,7 +17,7 @@ internal static class PlaybackPacer
 
         firstMediaTimestamp ??= timestamp;
         presentationStartedAt ??= now;
-        var rate = ClampPlaybackRate(playbackRate);
+        var rate = PlaybackRatePolicy.Normalize(playbackRate);
         var dueAt = presentationStartedAt.Value + TimeSpan.FromTicks((long)((timestamp - firstMediaTimestamp.Value).Ticks / rate));
         var delay = dueAt - now;
         if (delay <= TimeSpan.FromMilliseconds(2))
@@ -26,19 +26,5 @@ internal static class PlaybackPacer
         }
 
         return delay > TimeSpan.FromMilliseconds(250) ? fallbackFrameInterval : delay;
-    }
-
-    /// <summary>
-    /// 将播放速度限制在支持范围内。
-    /// </summary>
-    public static double ClampPlaybackRate(double rate)
-    {
-        if (double.IsNaN(rate) || double.IsInfinity(rate)) return 1.0;
-        if (rate < 0.5)
-        {
-            return 0.5;
-        }
-
-        return rate > 2.0 ? 2.0 : rate;
     }
 }

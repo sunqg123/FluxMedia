@@ -222,7 +222,7 @@ public sealed class FFmpegSharedDemuxerTests
                 using var cancellation = new CancellationTokenSource();
                 using var worker = new FFmpegPacketAudioPlaybackWorker(
                     MediaSource.FromFile(mediaPath), Guid.NewGuid(), TimeSpan.Zero, demuxer.AudioStream!, demuxer.AudioPackets, () => demuxer.PacketGeneration,
-                    output, () => false, () => 1, () => false);
+                    output, () => false, () => 1, () => 1, () => false);
                 var task = worker.RunAsync(cancellation.Token);
                 await output.TailWaitStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
                 Assert.False(task.IsCompleted);

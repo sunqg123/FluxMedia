@@ -34,6 +34,7 @@ public sealed class PlaybackSchedulerTests
         {
             WorkerState = "Running",
             CurrentTime = TimeSpan.FromSeconds(10),
+            PresentationTime = TimeSpan.FromSeconds(9.9),
             OutputBufferedDuration = TimeSpan.FromMilliseconds(100),
             OutputDeviceDelay = TimeSpan.Zero
         };
@@ -57,6 +58,7 @@ public sealed class PlaybackSchedulerTests
         {
             WorkerState = "Running",
             CurrentTime = TimeSpan.FromSeconds(1),
+            PresentationTime = TimeSpan.FromSeconds(0.9),
             OutputBufferedDuration = TimeSpan.FromMilliseconds(100),
             OutputDeviceDelay = TimeSpan.Zero
         };
@@ -80,6 +82,7 @@ public sealed class PlaybackSchedulerTests
         {
             WorkerState = "Running",
             CurrentTime = TimeSpan.FromSeconds(1),
+            PresentationTime = TimeSpan.FromSeconds(0.9),
             OutputBufferedDuration = TimeSpan.FromMilliseconds(100),
             OutputDeviceDelay = TimeSpan.Zero,
             UpdatedAt = DateTimeOffset.UtcNow - TimeSpan.FromMilliseconds(200)
@@ -107,6 +110,7 @@ public sealed class PlaybackSchedulerTests
         {
             WorkerState = "Exited",
             CurrentTime = TimeSpan.FromSeconds(1),
+            PresentationTime = TimeSpan.FromSeconds(0.9),
             UpdatedAt = DateTimeOffset.UtcNow
         };
         var scheduler = new PlaybackScheduler(
@@ -129,6 +133,7 @@ public sealed class PlaybackSchedulerTests
         {
             WorkerState = "Running",
             CurrentTime = TimeSpan.FromSeconds(5),
+            PresentationTime = TimeSpan.FromSeconds(5),
             OutputBufferedDuration = TimeSpan.Zero,
             UpdatedAt = DateTimeOffset.UtcNow
         };

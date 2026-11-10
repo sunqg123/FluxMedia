@@ -103,7 +103,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     /// 初始化 FFmpeg 数据包音频播放工作线程所需的状态和资源。
     /// </summary>
     public FFmpegPacketAudioPlaybackWorker(
-        MediaSource source, Guid instanceId, TimeSpan startPosition, FFmpegStreamDescriptor stream, ChannelReader<FFmpegPacketLease> packets, Func<long> packetGeneration, IAudioOutputDevice output, Func<bool> isPaused, Func<double> volume, Func<bool> isMuted, Action<AudioPlaybackDiagnostics>? onDiagnostics = null, Func<PlaybackResyncRequest>? resyncRequest = null, FFmpegPacketConsumer? recordingPacketConsumer = null, Func<double>? playbackRate = null)
+        MediaSource source, Guid instanceId, TimeSpan startPosition, FFmpegStreamDescriptor stream, ChannelReader<FFmpegPacketLease> packets, Func<long> packetGeneration, IAudioOutputDevice output, Func<bool> isPaused, Func<double> playbackRate, Func<double> volume, Func<bool> isMuted, Action<AudioPlaybackDiagnostics>? onDiagnostics = null, Func<PlaybackResyncRequest>? resyncRequest = null, FFmpegPacketConsumer? recordingPacketConsumer = null)
     {
         _source = source;
         _instanceId = instanceId;
@@ -113,7 +113,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
         _packetGeneration = packetGeneration;
         _output = output;
         _isPaused = isPaused;
-        _playbackRate = playbackRate ?? (() => 1.0);
+        _playbackRate = playbackRate;
         _volume = volume;
         _isMuted = isMuted;
         _resyncRequest = resyncRequest ?? (() => default);
