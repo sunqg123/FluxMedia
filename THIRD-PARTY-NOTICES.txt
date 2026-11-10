@@ -1,0 +1,30 @@
+FluxMedia.Playback third-party notices
+=======================================
+
+This package bundles managed third-party components required by the
+playback SDK. It does not distribute FFmpeg native DLLs, ffmpeg.exe,
+or ffprobe.exe. Applications must provide compatible FFmpeg native shared
+libraries separately.
+
+FFmpeg.AutoGen
+--------------
+Version: 9.0.1.1
+License file: licenses/FFmpeg.AutoGen-LICENSE.txt
+Project: https://github.com/Ruslan-B/FFmpeg.AutoGen
+
+NAudio
+------
+Version: 2.2.1
+License file: licenses/NAudio-LICENSE.txt
+Project: https://github.com/naudio/NAudio
+
+OpenAL
+------
+The Linux playback backend dynamically uses the system-provided
+libopenal.so.1. The OpenAL native library is not distributed in this package.
+
+System.Threading.Channels
+-------------------------
+Version: 6.0.0
+License file: licenses/System.Threading.Channels-LICENSE.txt
+Project: https://github.com/dotnet/runtime

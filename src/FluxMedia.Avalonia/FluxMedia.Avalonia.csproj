@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PackageId>FluxMedia.Avalonia</PackageId>
+    <Version>$(FluxMediaVersion)</Version>
+    <Authors>FluxMedia</Authors>
+    <Description>Avalonia 11/12 playback controls for FluxMedia on .NET 6 and later, targeting .NET Standard 2.1.</Description>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <IncludeSymbols>false</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageReleaseNotes>FluxMedia 1.1.1: smoother progress-bar seeking and the matching FluxMedia.Playback 1.1.1 dependency with lifecycle, performance, dependency propagation, and opt-in logging fixes.</PackageReleaseNotes>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <PackageReference Include="Avalonia" Version="11.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\FluxMedia.Playback\FluxMedia.Playback.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\CompilerServices\IsExternalInit.cs" Link="CompilerServices\IsExternalInit.cs" />
+  </ItemGroup>
+</Project>

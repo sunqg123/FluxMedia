@@ -1,0 +1,19 @@
+bin/
+obj/
+.vs/
+.idea/
+TestResults/
+artifacts/
+[Ll]ogs/
+*.log
+*.dmp
+*.suo
+*.user
+
+# 本机调试素材和外部原生依赖不进入源码仓库。
+/Sample.mp4
+/FFmpeg/*
+!/FFmpeg/README.md
+
+# 已停用的本机工程工具目录。
+/eng/

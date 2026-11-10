@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>preview</LangVersion>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <FFmpegAutoGenVersion Condition="'$(FFmpegAutoGenVersion)' == ''">9.0.1.1</FFmpegAutoGenVersion>
+    <RepositoryUrl>https://github.com/sunqg123/FluxMedia</RepositoryUrl>
+    <FluxMediaVersion>1.1.1</FluxMediaVersion>
+  </PropertyGroup>
+</Project>

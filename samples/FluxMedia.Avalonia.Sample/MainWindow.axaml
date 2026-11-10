@@ -1,0 +1,135 @@
+<Window xmlns="https://github.com/avaloniaui"
+		xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+		xmlns:flux="clr-namespace:FluxMedia.Avalonia;assembly=FluxMedia.Avalonia"
+		xmlns:vm="clr-namespace:FluxMedia.Avalonia.Sample"
+		x:Class="FluxMedia.Avalonia.Sample.MainWindow"
+		x:DataType="vm:MainWindowViewModel"
+		Width="1280"
+		Height="820"
+		MinWidth="900"
+		MinHeight="600"
+		Title="FluxMedia Multi Player">
+	<Grid RowDefinitions="Auto,*" Background="#111827">
+		<Border Padding="16,12" Background="#1F2937">
+			<Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+				<StackPanel>
+					<TextBlock Text="FluxMedia Multi Player" FontSize="20" FontWeight="SemiBold" Foreground="White" />
+					<TextBlock Text="MVVM · independent players · D3D11VA / VAAPI diagnostics"
+							   Foreground="#9CA3AF" />
+				</StackPanel>
+				<TextBlock Grid.Column="1"
+						   VerticalAlignment="Center"
+						   Foreground="#D1D5DB"
+						   Text="{Binding PlayerCountText}" />
+				<Button Grid.Column="2"
+						Padding="16,8"
+						Content="+ Add player"
+						Command="{Binding AddPlayerCommand}" />
+			</Grid>
+		</Border>
+
+		<ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+			<ItemsControl ItemsSource="{Binding Players}" Margin="14">
+				<ItemsControl.ItemsPanel>
+					<ItemsPanelTemplate>
+						<WrapPanel Orientation="Horizontal" />
+					</ItemsPanelTemplate>
+				</ItemsControl.ItemsPanel>
+				<ItemsControl.ItemTemplate>
+					<DataTemplate x:DataType="vm:PlayerItemViewModel">
+						<Border Width="590"
+								MinHeight="520"
+								Margin="7"
+								Padding="12"
+								CornerRadius="8"
+								Background="#F8FAFC"
+								BorderBrush="#374151"
+								BorderThickness="1">
+							<Grid RowDefinitions="Auto,310,Auto,Auto,Auto,Auto,*" RowSpacing="9">
+								<Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+									<StackPanel Orientation="Horizontal" Spacing="8">
+										<TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
+										<TextBlock Text="{Binding StateText}" VerticalAlignment="Center" Foreground="#4B5563" />
+									</StackPanel>
+									<Button Grid.Column="1"
+											Content="Remove"
+											Command="{Binding RemoveCommand}"
+											IsEnabled="{Binding CanRemove}" />
+								</Grid>
+
+								<Border Grid.Row="1" Background="Black" CornerRadius="5" ClipToBounds="True">
+									<flux:FluxPlayerView Player="{Binding Player}" />
+								</Border>
+
+								<Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="7">
+									<TextBox Text="{Binding SourceText}"
+											 PlaceholderText="Local file, http(s), rtsp, rtmp or m3u8" />
+									<Button Grid.Column="1" Content="Browse" Command="{Binding BrowseCommand}" />
+									<Button Grid.Column="2" Content="Open + Play" Command="{Binding OpenCommand}" />
+								</Grid>
+
+								<Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="7">
+									<Button Content="Play" Command="{Binding PlayCommand}" />
+									<Button Grid.Column="1" Content="Pause" Command="{Binding PauseCommand}" />
+									<Button Grid.Column="2" Content="-10s" Command="{Binding RewindCommand}" IsEnabled="{Binding Player.CanSeek}" />
+									<Button Grid.Column="3" Content="+10s" Command="{Binding ForwardCommand}" IsEnabled="{Binding Player.CanSeek}" />
+									<Slider Grid.Column="4"
+											Minimum="0"
+											Maximum="{Binding Player.DurationSeconds}"
+											Value="{Binding Player.PositionSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+											IsEnabled="{Binding Player.CanSeek}"
+											VerticalAlignment="Center" />
+									<Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" />
+								</Grid>
+
+								<Grid Grid.Row="4" ColumnDefinitions="Auto,130,Auto,*" ColumnSpacing="8">
+									<TextBlock Text="{Binding Player.TimeText}" VerticalAlignment="Center" />
+									<Slider Grid.Column="1"
+											Minimum="0"
+											Maximum="1"
+											Value="{Binding Player.Volume}"
+											VerticalAlignment="Center" />
+									<CheckBox Grid.Column="2"
+											  Content="Mute"
+											  IsChecked="{Binding Player.IsMuted}"
+											  VerticalAlignment="Center" />
+									<TextBlock Grid.Column="3"
+											   Text="{Binding ErrorText}"
+											   Foreground="#B91C1C"
+											   TextTrimming="CharacterEllipsis"
+											   VerticalAlignment="Center" />
+								</Grid>
+
+								<Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="7">
+									<TextBox Text="{Binding RecordingPath}"
+											 PlaceholderText="Recording output path (.mp4)" />
+									<Button Grid.Column="1"
+											Content="Record"
+											Command="{Binding StartRecordingCommand}" />
+									<Button Grid.Column="2"
+											Content="Stop Rec"
+											Command="{Binding StopRecordingCommand}" />
+								</Grid>
+
+								<Border Grid.Row="6"
+										Padding="9"
+										CornerRadius="5"
+										Background="#EEF2F7"
+										BorderBrush="#D1D5DB"
+										BorderThickness="1">
+									<StackPanel Spacing="4">
+										<TextBlock Text="{Binding RecordingText}" Foreground="#7C2D12" />
+										<TextBlock Text="{Binding DiagnosticText}"
+												   FontFamily="Consolas"
+												   FontSize="11"
+												   TextWrapping="Wrap" />
+									</StackPanel>
+								</Border>
+							</Grid>
+						</Border>
+					</DataTemplate>
+				</ItemsControl.ItemTemplate>
+			</ItemsControl>
+		</ScrollViewer>
+	</Grid>
+</Window>

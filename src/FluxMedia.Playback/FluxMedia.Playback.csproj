@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>FluxMedia.Playback</PackageId>
+    <Version>$(FluxMediaVersion)</Version>
+    <Authors>FluxMedia</Authors>
+    <Company>FluxMedia</Company>
+    <Description>FluxMedia 跨平台视频播放包，提供本地视频、网络拉流、播放控制、音频输出和当前播放输出视频录制；FFmpeg native shared library 由应用自行部署并配置。</Description>
+    <PackageTags>fluxmedia;multimedia;ffmpeg;dotnet;playback;video;audio;streaming</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <DebugType>None</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <IncludeSymbols>false</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageReleaseNotes>FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI. Architecture refactor: one FluxEngine player entry point, isolated playback pipeline ownership, unified seek and recording control, static logging, and removal of legacy Runtime and compatibility factories. Existing callers must migrate to FluxEngine.CreatePlayer.</PackageReleaseNotes>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="LICENSE.txt" Pack="true" PackagePath="\" />
+    <None Include="..\..\THIRD-PARTY-NOTICES.txt" Pack="true" PackagePath="\" />
+    <None Include="..\..\licenses\FFmpeg.AutoGen-LICENSE.txt" Pack="true" PackagePath="licenses\" />
+    <None Include="..\..\licenses\NAudio-LICENSE.txt" Pack="true" PackagePath="licenses\" />
+    <None Include="..\..\licenses\System.Threading.Channels-LICENSE.txt" Pack="true" PackagePath="licenses\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="FFmpeg.AutoGen" Version="$(FFmpegAutoGenVersion)" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+    <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
+    <PackageReference Include="Silk.NET.Direct3D11" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.DXGI" Version="2.23.0" />
+    <PackageReference Include="System.Threading.Channels" Version="6.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\CompilerServices\IsExternalInit.cs" Link="CompilerServices\IsExternalInit.cs" />
+  </ItemGroup>
+</Project>
