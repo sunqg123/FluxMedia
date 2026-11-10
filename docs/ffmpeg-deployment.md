@@ -2,6 +2,7 @@
 
 当前默认托管绑定为 FFmpeg.AutoGen 9.0.1.1。NuGet 包不分发 FFmpeg 原生库。
 应用使用 `FluxEngineOptions.FFmpegPath` 或 `FLUXMEDIA_FFMPEG_ROOT` 指定共享库目录。
+源码仓库通过 Git LFS 提供 Windows x64 原生库与命令行工具，执行 `git lfs pull` 后可在 `FFmpeg/win-x64/native` 找到；这不改变 NuGet 包的分发范围。
 本轮源码修改未构建、未测试；旧测量结果不能代表当前版本。
 
 ## 统一维护位置
