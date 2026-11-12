@@ -10,8 +10,9 @@
 
 ## 进度条绑定
 
-Avalonia 示例将进度条与 `Player.PositionSeconds` 双向绑定，使用 `PropertyChanged` 提交拖动目标，
-并通过 `Player.CanSeek` 控制是否可调整。
+Avalonia 控制栏将进度条与 `PlayerBinding.PositionSeconds` 双向绑定，由绑定赋值提交拖动目标，
+并通过绑定对象读取核心 CanSeek 控制是否可调整。适配器由 FluxPlayerControl 管理，可通过 Presentation 访问。
+拖动预览保存在绑定对象中，Player.Position 与 PositionChanged 继续报告核心位置。
 
 自定义 UI 应区分程序回写和交互赋值，避免播放进度刷新产生新的 Seek。
 也可以调用 `SeekAsync` 或 `SeekByAsync`，两者都经过核心权限检查。

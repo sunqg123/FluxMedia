@@ -172,7 +172,7 @@ public sealed partial class FluxPlayerControl
         }
 
         _controlsHost.SetCurrentValue(ContentPresenter.ContentTemplateProperty, ControlBarTemplate);
-        _controlsHost.SetCurrentValue(ContentPresenter.ContentProperty, ControlBarTemplate is null ? null : Player);
+        _controlsHost.SetCurrentValue(ContentPresenter.ContentProperty, ControlBarTemplate is null ? null : Presentation);
     }
 
     /// <summary>
@@ -182,7 +182,7 @@ public sealed partial class FluxPlayerControl
         && !IsBusy
         && !IsSpeedChangePending
         && string.IsNullOrEmpty(ErrorText)
-        && Player is { IsDisposed: false, IsPlaying: true, IsSeeking: false };
+        && Presentation is { IsDisposed: false, IsPlaying: true, IsSeeking: false };
 
     /// <summary>
     /// 检查自动隐藏开关、延时和播放状态。

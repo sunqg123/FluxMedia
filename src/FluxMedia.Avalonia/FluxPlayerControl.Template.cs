@@ -39,7 +39,7 @@ public sealed partial class FluxPlayerControl
         var controls = new ContentPresenter
         {
             Name = "PART_ControlsHost",
-            Content = owner.ControlBarTemplate is null ? null : owner.Player,
+            Content = owner.ControlBarTemplate is null ? null : owner.Presentation,
             ContentTemplate = owner.ControlBarTemplate,
             IsVisible = owner.AreControlsVisible,
             HorizontalContentAlignment = HorizontalAlignment.Stretch,

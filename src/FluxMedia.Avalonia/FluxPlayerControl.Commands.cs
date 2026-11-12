@@ -3,7 +3,7 @@ using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Errors;
 using FluxMedia.Core.Logging;
 using FluxMedia.Playback;
-using System.ComponentModel;
+using FluxMedia.Avalonia.Bindings;
 
 namespace FluxMedia.Avalonia;
 
@@ -84,12 +84,15 @@ public sealed partial class FluxPlayerControl
         _subscribedPlayer = Player;
         if (_subscribedPlayer is not null)
         {
-            _subscribedPlayer.PropertyChanged += OnPlayerPropertyChanged;
+            var binding = new PlayerBinding(_subscribedPlayer);
+            binding.Updated += OnPresentationUpdated;
+            SetAndRaise(PresentationProperty, ref _presentation, binding);
             _subscribedPlayer.Faulted += OnPlayerFaulted;
         }
         SetAndRaise(IsBusyProperty, ref _isBusy, false);
         SetAndRaise(ErrorTextProperty, ref _errorText, string.Empty);
         RefreshCommands();
+        UpdateControlBar();
         ShowControls();
     }
 
@@ -99,29 +102,26 @@ public sealed partial class FluxPlayerControl
     private void UnsubscribePlayer()
     {
         Interlocked.Increment(ref _subscriptionVersion);
-        if (_subscribedPlayer is null) return;
-        _subscribedPlayer.PropertyChanged -= OnPlayerPropertyChanged;
-        _subscribedPlayer.Faulted -= OnPlayerFaulted;
+        if (_presentation is not null)
+        {
+            _presentation.Updated -= OnPresentationUpdated;
+            _presentation.Dispose();
+            SetAndRaise(PresentationProperty, ref _presentation, null);
+        }
+        if (_subscribedPlayer is not null) _subscribedPlayer.Faulted -= OnPlayerFaulted;
         _subscribedPlayer = null;
+        UpdateControlBar();
     }
 
     /// <summary>
-    /// 在界面线程刷新播放状态和操作权限。
+    /// 绑定对象已完成 UI 派发，直接刷新命令和控制栏。
     /// </summary>
-    private void OnPlayerPropertyChanged(object? sender, PropertyChangedEventArgs args)
+    private void OnPresentationUpdated(bool sourceChanged)
     {
-        if (args.PropertyName is not (null or "" or nameof(Player.State) or nameof(Player.Source)
-            or nameof(Player.IsPlaying) or nameof(Player.CanSeek) or nameof(Player.CanChangeSpeed)
-            or nameof(Player.IsDisposed) or nameof(Player.IsSeeking) or nameof(Player.IsSpeedChangePending)
-            or nameof(Player.RequestedSpeed) or nameof(Player.LastSpeedError))) return;
-        var version = Interlocked.Read(ref _subscriptionVersion);
-        Dispatcher.UIThread.Post(() =>
-        {
-            if (sender is not Player player || !IsCurrentPlayer(player, version)) return;
-            if (args.PropertyName == nameof(Player.Source)) SetAndRaise(ErrorTextProperty, ref _errorText, string.Empty);
-            RefreshCommands();
-            ShowControls();
-        });
+        if (!_isAttached) return;
+        if (sourceChanged) SetAndRaise(ErrorTextProperty, ref _errorText, string.Empty);
+        RefreshCommands();
+        ShowControls();
     }
 
     /// <summary>

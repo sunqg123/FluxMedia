@@ -27,7 +27,7 @@ await player.StopAsync();
 
 ## Playback Speed
 
-Use `Player.CanChangeSpeed` to enable speed controls. `Player.Speed` supports binding,
+Use `Player.CanChangeSpeed` to inspect rate-change capability. `Player.Speed` reports the applied rate,
 and `SetSpeedAsync` accepts rates in the configured inclusive range, defaulting to 0.1–10.
 Configure `MinPlaybackRate` and `MaxPlaybackRate` on `FluxEngineOptions`; all players share this startup policy.
 The bounds must be positive finite values whose range includes 1.
@@ -40,7 +40,7 @@ Invalid configurations throw from `FluxEngine.Start` before logging or native in
 Out-of-range requests fail explicitly instead of being clamped.
 Video-only playback uses the same configured range and skips per-request audio planning.
 Live and unknown-duration sources reject rate changes in the core.
-`Player.DefaultSpeeds` supplies optional UI presets; applications can supply their own lists and rates.
+UI presets belong to `FluxPlayerControl.DefaultSpeeds` in the Avalonia package; applications can supply their own lists and rates.
 Audio chains FFmpeg atempo filters to preserve pitch, and video follows the audible audio clock across rate changes.
 Requests are confirmed after committing the processing chain. Paused/not-started requests return success with `IsDeferred=true`;
 observe `IsSpeedChangePending`, `RequestedSpeed`, and `LastSpeedError` for their eventual outcome.
@@ -50,11 +50,14 @@ Successful opening does not guarantee a custom initial rate was applied; inspect
 Native libraries must include avfilter and the audio filters.
 Recording retains the original media timestamps.
 
-Version 1.2.0 tightens the default rate range from arbitrary positive finite values to 0.1–10.
+Version 1.1.4 tightens the default rate range from arbitrary positive finite values to 0.1–10.
 Applications using values outside this range must configure the bounds in `FluxEngineOptions` before starting the engine; audio stage counts follow automatically.
 
 ## Notes
 
+- Player exposes read-only playback values and async commands. It does not capture a UI synchronization context,
+  implement INotifyPropertyChanged, or format display time strings. Core events run on the triggering thread.
+  Avalonia controls manage PlayerBinding for UI notifications and two-way binding; headless callers use Player directly.
 - The default binding is FFmpeg.AutoGen 9.0.1.1 and requires matching FFmpeg 9 shared libraries.
   Native libraries are supplied by the application.
 - Configure FFmpeg through `FluxEngineOptions.FFmpegPath` or

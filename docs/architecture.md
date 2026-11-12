@@ -17,10 +17,15 @@ flowchart TD
     Hub --> View[FluxPlayerView 或自定义消费者]
     Control[FluxPlayerControl] --> View
     Control --> Player
+    Control --> Binding[PlayerBinding]
+    Binding --> Player
 ```
 
 `FluxPlayerControl` 组合显示层、基础命令和使用方提供的控制栏模板。它只借用外部 Player，
 显隐、输入和错误提示留在 Avalonia 层，全屏由宿主响应请求。
+Player 只提供核心状态、异步命令与普通事件；不承担 UI 线程派发、属性通知和时间文本。
+Avalonia 的 Bindings/PlayerBinding 处理双向绑定与进度预览，控件通过 Presentation 暴露当前适配器。
+适配器不参与解码或视频帧传递，卸载时解除订阅而不释放外部播放器。
 
 ## 源码职责目录
 

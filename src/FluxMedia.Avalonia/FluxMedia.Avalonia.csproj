@@ -13,7 +13,7 @@
     <DebugSymbols Condition="'$(Configuration)' != 'Debug'">false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): customizable playback controls and speed presets, template property synchronization, and idle-based control visibility.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): controls manage PlayerBinding for UI notifications, two-way properties and display time. ControlBarTemplate now receives PlayerBinding; collections still contain Player. UI speed presets belong to FluxPlayerControl.DefaultSpeeds. Customizable controls, overlays, template synchronization and idle-based visibility.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <PackageReadmeFile>README.md</PackageReadmeFile>

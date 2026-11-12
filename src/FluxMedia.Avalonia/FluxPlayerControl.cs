@@ -5,6 +5,7 @@ using Avalonia.Controls.Templates;
 using Avalonia.Media;
 using Avalonia.Threading;
 using FluxMedia.Avalonia.Internal;
+using FluxMedia.Avalonia.Bindings;
 using FluxMedia.Playback;
 using System.Windows.Input;
 
@@ -16,6 +17,18 @@ namespace FluxMedia.Avalonia;
 public sealed partial class FluxPlayerControl : TemplatedControl
 {
     /// <summary>
+    /// 控件默认倍速档位，与核心允许范围分别维护。
+    /// </summary>
+    public static IReadOnlyList<double> DefaultSpeeds { get; } =
+        Array.AsReadOnly(new[] { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0 });
+
+    /// <summary>
+    /// 控件拥有的界面绑定对象。
+    /// </summary>
+    public static readonly DirectProperty<FluxPlayerControl, PlayerBinding?> PresentationProperty =
+        AvaloniaProperty.RegisterDirect<FluxPlayerControl, PlayerBinding?>(nameof(Presentation), control => control.Presentation);
+
+    /// <summary>
     /// 播放器绑定属性。
     /// </summary>
     public static readonly StyledProperty<Player?> PlayerProperty =
@@ -26,8 +39,8 @@ public sealed partial class FluxPlayerControl : TemplatedControl
     /// </summary>
     public static readonly StyledProperty<IReadOnlyList<double>> PlaybackSpeedsProperty =
         AvaloniaProperty.Register<FluxPlayerControl, IReadOnlyList<double>>(
-            nameof(PlaybackSpeeds), global::FluxMedia.Playback.Player.DefaultSpeeds,
-            coerce: static (_, speeds) => speeds ?? global::FluxMedia.Playback.Player.DefaultSpeeds);
+            nameof(PlaybackSpeeds), DefaultSpeeds,
+            coerce: static (_, speeds) => speeds ?? DefaultSpeeds);
 
     /// <summary>
     /// 画面缩放方式的绑定属性。
@@ -109,6 +122,11 @@ public sealed partial class FluxPlayerControl : TemplatedControl
     /// 已订阅状态通知的播放器。
     /// </summary>
     private Player? _subscribedPlayer;
+
+    /// <summary>
+    /// 每个控件独立管理绑定预览与通知。
+    /// </summary>
+    private PlayerBinding? _presentation;
 
     /// <summary>
     /// 控件是否已挂载到可视树。
@@ -214,6 +232,11 @@ public sealed partial class FluxPlayerControl : TemplatedControl
     }
 
     /// <summary>
+    /// 控制栏和外部状态显示可使用的绑定对象。
+    /// </summary>
+    public PlayerBinding? Presentation => _presentation;
+
+    /// <summary>
     /// 画面缩放方式。
     /// </summary>
     public Stretch Stretch
@@ -223,7 +246,7 @@ public sealed partial class FluxPlayerControl : TemplatedControl
     }
 
     /// <summary>
-    /// 自定义控制栏模板，数据上下文为 Player。
+    /// 自定义控制栏模板，数据上下文为 PlayerBinding。
     /// </summary>
     public IDataTemplate? ControlBarTemplate
     {

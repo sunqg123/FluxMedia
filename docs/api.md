@@ -45,7 +45,9 @@ await player.StopAsync();
 ## 自定义进度 UI
 
 `Player.CanSeek` 为只读能力，`Player.IsLive` 为内容判断。
-持续写入 `PositionSeconds` 可以提交点播拖动目标，无需等到松开。
+Avalonia 控制栏通过 `PlayerBinding.PositionSeconds` 提交点播拖动目标，无需等到松开。
+该绑定对象由 FluxPlayerControl 创建，外部页面可以通过控件的 Presentation 属性访问。
+核心 `Player.Position`、`Duration`、`Speed`、`Volume`、`IsMuted` 是只读实际值，设置操作使用异步命令。
 直接调用 `SeekAsync` 或 `SeekByAsync` 同样经过核心权限检查。
 直播返回 NotSeekable，绑定赋值也不会修改核心播放位置。
 未知时长的网络源保守禁止 Seek，特殊流需根据元数据与日志进一步确认。
@@ -82,10 +84,10 @@ var player = FluxEngine.CreatePlayer();
 ```
 
 纯视频同样遵守配置范围，只跳过单次请求的音频计划检查；音频计划和建图均使用由范围推算的最大级数。
-`Player.DefaultSpeeds` 保持 0.5、0.75、1、1.25、1.5、2、3、4，是界面候选项，不是范围边界。
-1.2.0 保留 `Player.SupportedSpeeds` 作为弃用别名，旧调用方仍可编译，后续请改用 `DefaultSpeeds`。
+`FluxPlayerControl.DefaultSpeeds` 保持 0.5、0.75、1、1.25、1.5、2、3、4，是界面候选项，不是范围边界。
+候选列表属于 Avalonia，核心 Player 不再维护 DefaultSpeeds 或 SupportedSpeeds。
 使用方可以维护自己的列表；`Player.CanChangeSpeed` 用于控制 UI。
-绑定无效速度时会记录警告并恢复实际值；需要接收操作结果时调用 `SetSpeedAsync`。
+PlayerBinding 绑定无效速度时会记录警告并恢复实际值；需要接收操作结果时调用 `Player.SetSpeedAsync`。
 已打开媒体的换速请求依次校验：正有限数值 → 配置范围 → 音频预算 → 媒体能力，失败统一返回 `PlaybackRateNotSupported`。
 超出范围的提示包含上下限与当前值，例如使用默认配置时“播放速度需在 0.1 到 10 之间（当前 25）”，不会自动截取到边界。
 直播在前三项通过后返回“直播不支持倍速”，未知时长媒体仍由核心拒绝。
@@ -120,13 +122,24 @@ if (player.CanChangeSpeed)
 取消令牌仅能作废提交前的普通等待请求；进入提交后，异步调用会等待应用结果或提交故障，不承诺取消即返回。
 停止、切源或释放返回的 `OperationCanceled` 可表示“请求所属管线已退役”，不承诺旧管线从未短暂切换滤镜。
 旧管线结果不会发布到新管线；看门狗不是强行中断原生调用或立即释放原生资源的机制。
-`Player.Speed` 只发布已应用值，`RequestedSpeed`、`IsSpeedChangePending`、`LastSpeedError` 提供目标与操作状态。
+`Player.Speed` 只提供已应用值，`RequestedSpeed`、`IsSpeedChangePending`、`LastSpeedError` 提供目标与操作状态；双向绑定由 PlayerBinding 承接。
 诊断包含 `RequestedRate`、`AppliedRate`、`RateRequestId`、`RateChangeState`、`LastRateError`，以及当前配置的 `MinRate`、`MaxRate`；失败时请求值与应用值不等是正常的。
 `RateChangeState` 和 `LastRateError` 属于最近登记的换速请求，不代表当前播放健康状态。
 当前请求成功时清除其旧错误；较早请求的成功或失败不能覆盖较新请求的结果。
 倍速只影响播放，录制保留源媒体的时间戳与时长。
 
-1.2.0 行为变更：默认允许范围从任意正有限数值收紧到 0.1～10。此前低于 0.1 或超过 10 的调用会被拒绝；需要更大范围时在 FluxEngineOptions 中配置上下限，Start 校验通过后生效，音频级数自动匹配范围。
+1.1.4 行为变更：默认允许范围从任意正有限数值收紧到 0.1～10。此前低于 0.1 或超过 10 的调用会被拒绝；需要更大范围时在 FluxEngineOptions 中配置上下限，Start 校验通过后生效，音频级数自动匹配范围。
+
+## 核心状态与界面绑定
+
+Player 不捕获 SynchronizationContext，不实现 INotifyPropertyChanged，也不拼接显示时间文本。
+StateChanged、PositionChanged、Faulted 和 PlaybackChanged 在触发线程通知，调用方负责自己的线程派发，事件处理应及时返回。
+PlaybackChanged 表示媒体、控制值、倍速请求或释放状态变化；读取 Player 的只读属性可得到当前值。
+Avalonia 的 PlayerBinding 合并这些通知并派发到 UI 线程，处理拖动预览、双向赋值和失败回读。
+1.1.5 将绑定职责移出核心，包含公开成员删除、属性改为只读及事件线程约定调整，升级时需要同步迁移。
+手动创建 PlayerBinding 时须在 UI 线程创建，结束使用后 Dispose 以解除订阅；控件内部创建的实例由控件释放。
+业务集合仍使用 ObservableCollection<Player>，FluxPlayerControl 内部管理绑定对象，卸载控件不释放 Player。
+自定义模板的数据类型及旧属性迁移见 [Avalonia 控件](avalonia-controls.md#绑定迁移)。
 
 ## 视频帧
 

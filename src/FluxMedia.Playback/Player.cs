@@ -3,21 +3,14 @@ using FluxMedia.Core.Errors;
 using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.Playback.Internal;
-using System.Collections.Concurrent;
-using System.ComponentModel;
 
 namespace FluxMedia.Playback;
 
 /// <summary>
-/// 串行执行播放命令，并提供界面绑定属性。
+/// 串行执行播放命令，公开实际状态和播放事件。
 /// </summary>
-public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
+public sealed class Player : IAsyncDisposable
 {
-    /// <summary>
-    /// 按属性名复用的变更事件参数。
-    /// </summary>
-    private static readonly ConcurrentDictionary<string, PropertyChangedEventArgs> PropertyChangedArgs = new(StringComparer.Ordinal);
-
     /// <summary>
     /// 底层播放会话。
     /// </summary>
@@ -34,44 +27,9 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     private readonly object _disposeSync = new();
 
     /// <summary>
-    /// 取消绑定跳转任务的信号源。
-    /// </summary>
-    private readonly CancellationTokenSource _bindingSeekCts = new();
-
-    /// <summary>
-    /// 创建播放器时捕获的通知线程上下文。
-    /// </summary>
-    private readonly SynchronizationContext? _notificationContext;
-
-    /// <summary>
     /// 确保多次释放共享同一个完成任务。
     /// </summary>
     private Task? _disposeTask;
-
-    /// <summary>
-    /// 供界面绑定的播放位置（秒）。
-    /// </summary>
-    private double _positionSeconds;
-
-    /// <summary>
-    /// 供界面绑定的媒体总时长（秒）。
-    /// </summary>
-    private double _durationSeconds = 1;
-
-    /// <summary>
-    /// 当前音量，范围为 0 到 1。
-    /// </summary>
-    private double _volume;
-
-    /// <summary>
-    /// 是否处于静音状态。
-    /// </summary>
-    private bool _isMuted;
-
-    /// <summary>
-    /// 是否存在尚未完成的绑定跳转请求。
-    /// </summary>
-    private int _bindingSeekPending;
 
     /// <summary>
     /// 是否已释放资源。
@@ -84,18 +42,12 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     internal Player(PlaybackSession session)
     {
         _session = session;
-        _notificationContext = SynchronizationContext.Current;
-        _positionSeconds = session.CurrentTime.TotalSeconds;
-        _durationSeconds = Math.Max(1, session.Duration?.TotalSeconds ?? 1);
-        _volume = session.Volume;
-        _isMuted = session.IsMuted;
         _session.StateChanged += OnSessionStateChanged;
         _session.Faulted += OnSessionFaulted;
         _session.PositionChanged += OnSessionPositionChanged;
         _session.PlaybackRateChanged += OnSessionPlaybackRateChanged;
         // 视频链路⑤订阅：接收会话的帧事件。
         _session.VideoFrameReady += OnSessionVideoFrameReady;
-
     }
 
     /// <summary>
@@ -124,13 +76,9 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public MediaSource? Source => _session.CurrentSource;
 
     /// <summary>
-    /// 当前播放位置；设置时异步跳转。
+    /// 核心报告的实际播放位置，跳转通过 SeekAsync 提交。
     /// </summary>
-    public TimeSpan Position
-    {
-        get => TimeSpan.FromSeconds(_positionSeconds);
-        set => PositionSeconds = value.TotalSeconds;
-    }
+    public TimeSpan Position => _session.CurrentTime;
 
     /// <summary>
     /// 媒体总时长，未知时为空。
@@ -143,57 +91,14 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public bool IsLive => _session.IsLive;
 
     /// <summary>
-    /// 是否允许跳转，供自定义界面绑定。
+    /// 当前媒体是否允许跳转。
     /// </summary>
     public bool CanSeek => !_disposed && _session.CanSeek;
 
     /// <summary>
-    /// 是否仍有跳转执行或绑定请求等待完成。
+    /// 核心是否正在执行跳转。
     /// </summary>
-    public bool IsSeeking => State == PlaybackState.Seeking || Volatile.Read(ref _bindingSeekPending) > 0;
-
-    /// <summary>
-    /// 供进度条绑定的位置，单位为秒。
-    /// </summary>
-    public double PositionSeconds
-    {
-        get => _positionSeconds;
-        set
-        {
-            if (!CanSeek)
-            {
-                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId,
-                    $"Event=SeekBindingRejected IsLive={IsLive} State={State} RequestedSeconds={value}");
-                return;
-            }
-            if (double.IsNaN(value) || double.IsInfinity(value)) return;
-            var normalized = Math.Max(0, Math.Min(DurationSeconds, value));
-            if (Math.Abs(normalized - _positionSeconds) < 0.001) return;
-            _positionSeconds = normalized;
-            ScheduleBindingSeek(normalized);
-            RaiseProperties(nameof(Position), nameof(PositionSeconds), nameof(PositionText), nameof(TimeText));
-        }
-    }
-
-    /// <summary>
-    /// 供进度条绑定的总时长，最小为一秒。
-    /// </summary>
-    public double DurationSeconds => _durationSeconds;
-
-    /// <summary>
-    /// 当前播放位置的显示文本。
-    /// </summary>
-    public string PositionText => FormatTime(Position);
-
-    /// <summary>
-    /// 媒体总时长的显示文本。
-    /// </summary>
-    public string DurationText => Duration.HasValue ? FormatTime(Duration.Value) : "--:--:--";
-
-    /// <summary>
-    /// 播放位置与总时长的组合文本。
-    /// </summary>
-    public string TimeText => $"{PositionText} / {DurationText}";
+    public bool IsSeeking => State == PlaybackState.Seeking;
 
     /// <summary>
     /// 当前媒体是否允许调整倍速。
@@ -216,64 +121,19 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public string? LastSpeedError => _session.LastPlaybackRateError;
 
     /// <summary>
-    /// 未自定义界面档位时使用的默认列表，允许范围由 FluxEngineOptions 决定。
+    /// 已确认应用的实际倍速。
     /// </summary>
-    public static IReadOnlyList<double> DefaultSpeeds { get; } =
-        Array.AsReadOnly(new[] { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0 });
+    public double Speed => _session.PlaybackRate;
 
     /// <summary>
-    /// 旧版候选档位入口，请改用 DefaultSpeeds。
+    /// 核心已采用的音量，范围为 0 到 1。
     /// </summary>
-    [Obsolete("Use DefaultSpeeds instead. This list contains presets, not the supported range.")]
-    public static IReadOnlyList<double> SupportedSpeeds => DefaultSpeeds;
+    public double Volume => _session.Volume;
 
     /// <summary>
-    /// 供界面绑定的播放速度。
+    /// 核心已采用的静音状态。
     /// </summary>
-    public double Speed
-    {
-        get => _session.PlaybackRate;
-        set
-        {
-            if (Source is null)
-            {
-                RaiseProperties(nameof(Speed));
-                return;
-            }
-            _ = SetSpeedFromBindingAsync(value);
-        }
-    }
-
-    /// <summary>
-    /// 供界面绑定的音量，范围为 0 到 1。
-    /// </summary>
-    public double Volume
-    {
-        get => _volume;
-        set
-        {
-            var normalized = Math.Max(0, Math.Min(1, value));
-            if (Math.Abs(normalized - _volume) < 0.0001) return;
-            _volume = normalized;
-            RaiseProperties(nameof(Volume));
-            _ = SetVolumeFromBindingAsync(normalized);
-        }
-    }
-
-    /// <summary>
-    /// 供界面绑定的静音状态。
-    /// </summary>
-    public bool IsMuted
-    {
-        get => _isMuted;
-        set
-        {
-            if (value == _isMuted) return;
-            _isMuted = value;
-            RaiseProperties(nameof(IsMuted));
-            _ = SetMutedFromBindingAsync(value);
-        }
-    }
+    public bool IsMuted => _session.IsMuted;
 
     /// <summary>
     /// 当前录制的诊断信息。
@@ -311,9 +171,9 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public event EventHandler<PlaybackVideoFrameEventArgs>? VideoFrameReady;
 
     /// <summary>
-    /// 绑定属性值变化时发出的通知。
+    /// 媒体、控制值或请求状态变化；在触发线程通知，订阅者负责线程切换。
     /// </summary>
-    public event PropertyChangedEventHandler? PropertyChanged;
+    public event EventHandler<EventArgs>? PlaybackChanged;
 
     /// <summary>
     /// 更新显示端支持的 GPU 输出能力。
@@ -345,7 +205,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         try
         {
             await _session.OpenAsync(new PlaybackOpenRequest(source, options), cancellationToken).ConfigureAwait(false);
-            RefreshMediaProperties();
+            NotifyPlaybackChanged();
         }
         finally
         {
@@ -371,7 +231,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         try
         {
             await _session.OpenAsync(new PlaybackOpenRequest(source, options), cancellationToken).ConfigureAwait(false);
-            RefreshMediaProperties();
+            NotifyPlaybackChanged();
             return await _session.PlayAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
@@ -423,7 +283,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public ValueTask<PlaybackResult> SeekByAsync(TimeSpan offset, CancellationToken cancellationToken = default) => SeekAsync(_session.CurrentTime + offset, cancellationToken);
 
     /// <summary>
-    /// 设置速度并更新界面绑定。
+    /// 设置速度并等待核心确认。
     /// </summary>
     public async ValueTask<PlaybackResult> SetSpeedAsync(double speed, CancellationToken cancellationToken = default)
     {
@@ -434,24 +294,22 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 设置音量并更新界面绑定。
+    /// 设置音量并返回核心结果。
     /// </summary>
     public ValueTask<PlaybackResult> SetVolumeAsync(double volume, CancellationToken cancellationToken = default) => ExecuteCommandAsync<PlaybackResult>(async token =>
         {
             var result = await _session.SetVolumeAsync(volume, token).ConfigureAwait(false);
-            _volume = _session.Volume;
-            RaiseProperties(nameof(Volume));
+            NotifyPlaybackChanged();
             return result;
         }, cancellationToken);
 
     /// <summary>
-    /// 设置静音并更新界面绑定。
+    /// 设置静音并返回核心结果。
     /// </summary>
     public ValueTask<PlaybackResult> SetMutedAsync(bool muted, CancellationToken cancellationToken = default) => ExecuteCommandAsync<PlaybackResult>(async token =>
         {
             var result = await _session.SetMutedAsync(muted, token).ConfigureAwait(false);
-            _isMuted = _session.IsMuted;
-            RaiseProperties(nameof(IsMuted));
+            NotifyPlaybackChanged();
             return result;
         }, cancellationToken);
 
@@ -461,8 +319,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public ValueTask<PlaybackResult> ToggleMutedAsync(CancellationToken cancellationToken = default) => ExecuteCommandAsync<PlaybackResult>(async token =>
         {
             var result = await _session.SetMutedAsync(!_session.IsMuted, token).ConfigureAwait(false);
-            _isMuted = _session.IsMuted;
-            RaiseProperties(nameof(IsMuted));
+            NotifyPlaybackChanged();
             return result;
         }, cancellationToken);
 
@@ -483,7 +340,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         try
         {
             var result = await _session.StartRecordingAsync(options, cancellationToken).ConfigureAwait(false);
-            RaiseRecordingProperties();
+            NotifyPlaybackChanged();
             return result;
         }
         finally
@@ -501,7 +358,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         try
         {
             var result = await _session.StopRecordingAsync(cancellationToken).ConfigureAwait(false);
-            RaiseRecordingProperties();
+            NotifyPlaybackChanged();
             return result;
         }
         finally
@@ -562,12 +419,12 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 取消绑定跳转，并等待命令结束后释放会话。
+    /// 取消待处理操作，并等待命令结束后释放会话。
     /// </summary>
     private async Task DisposeCoreAsync()
     {
         _disposed = true;
-        _bindingSeekCts.Cancel();
+        NotifyPlaybackChanged();
         _session.CancelPendingOperations();
         try
         {
@@ -591,112 +448,32 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
             FluxEngine.Unregister(this);
 
             _commandGate.Dispose();
-            _bindingSeekCts.Dispose();
+            NotifyPlaybackChanged();
         }
     }
 
     /// <summary>
-    /// 进度绑定直接提交给唯一的跳转调度器。
+    /// 转发换速请求与确认变化，不进行 UI 线程派发。
     /// </summary>
-    private void ScheduleBindingSeek(double seconds)
-    {
-        if (!CanSeek) return;
-        _ = ApplyBindingSeekAsync(seconds);
-    }
+    private void OnSessionPlaybackRateChanged() => NotifyPlaybackChanged();
 
     /// <summary>
-    /// 应用绑定的速度值，记录失败并恢复会话值。
-    /// </summary>
-    private async Task SetSpeedFromBindingAsync(double speed)
-    {
-        if (_disposed) return;
-        try
-        {
-            var result = await SetSpeedAsync(speed).ConfigureAwait(false);
-            if (!result.IsSuccess)
-                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId,
-                    $"Event=PlaybackRateBindingFailed Rate={speed} Error={result.Error} Message={result.Message}");
-        }
-        catch (Exception exception)
-        {
-            if (!_disposed)
-            {
-                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId,
-                    $"Event=PlaybackRateBindingFailed Rate={speed}", exception);
-                RaiseProperties(nameof(Speed));
-            }
-        }
-    }
-
-    /// <summary>
-    /// 应用绑定的音量值，异常时恢复会话值。
-    /// </summary>
-    private async Task SetVolumeFromBindingAsync(double volume)
-    {
-        if (_disposed) return;
-        try
-        {
-            await SetVolumeAsync(volume).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            if (!_disposed)
-            {
-                _volume = _session.Volume;
-                RaiseProperties(nameof(Volume));
-            }
-        }
-    }
-
-    /// <summary>
-    /// 应用绑定的静音值，异常时恢复会话值。
-    /// </summary>
-    private async Task SetMutedFromBindingAsync(bool muted)
-    {
-        if (_disposed) return;
-        try
-        {
-            await SetMutedAsync(muted).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            if (!_disposed)
-            {
-                _isMuted = _session.IsMuted;
-                RaiseProperties(nameof(IsMuted));
-            }
-        }
-    }
-
-    /// <summary>
-    /// 独立接收换速确认，暂停中不依赖位置通知刷新界面。
-    /// </summary>
-    private void OnSessionPlaybackRateChanged()
-    {
-        if (_disposed) return;
-        DispatchNotification(() =>
-        {
-            if (_disposed) return;
-            RaisePropertiesCore(nameof(Speed), nameof(RequestedSpeed), nameof(IsSpeedChangePending), nameof(LastSpeedError));
-        });
-    }
-
-    /// <summary>
-    /// 转发会话状态并更新播放状态属性。
+    /// 转发核心状态并通知可读数据变化。
     /// </summary>
     private void OnSessionStateChanged(object? sender, PlaybackState state)
     {
-        DispatchNotification(() =>
-        {
-            NotifySubscribers(StateChanged, state, nameof(StateChanged));
-            RaisePropertiesCore(nameof(State), nameof(IsPlaying), nameof(IsSeeking), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive));
-        });
+        NotifySubscribers(StateChanged, state, nameof(StateChanged));
+        NotifyPlaybackChanged();
     }
 
     /// <summary>
     /// 转发底层会话的错误通知。
     /// </summary>
-    private void OnSessionFaulted(object? sender, FluxMediaError error) => DispatchNotification(() => NotifySubscribers(Faulted, error, nameof(Faulted)));
+    private void OnSessionFaulted(object? sender, FluxMediaError error)
+    {
+        NotifySubscribers(Faulted, error, nameof(Faulted));
+        NotifyPlaybackChanged();
+    }
 
     /// <summary>
     /// 将底层视频帧通知转发给显示端。
@@ -705,79 +482,23 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     private void OnSessionVideoFrameReady(object? sender, PlaybackVideoFrameEventArgs args) => NotifySubscribers(VideoFrameReady, args, nameof(VideoFrameReady));
 
     /// <summary>
-    /// 同步会话进度并刷新界面绑定。
+    /// 在核心触发线程转发媒体进度。
     /// </summary>
-    private void OnSessionPositionChanged(object? sender, PlaybackPositionChangedEventArgs args)
-    {
-        DispatchNotification(() =>
-        {
-            NotifySubscribers(PositionChanged, args, nameof(PositionChanged));
-            if (Volatile.Read(ref _bindingSeekPending) == 0)
-            {
-                _positionSeconds = args.Position.TotalSeconds;
-            }
-            _durationSeconds = Math.Max(1, args.Duration?.TotalSeconds ?? 1);
-            RaisePropertiesCore(nameof(Position), nameof(PositionSeconds), nameof(PositionText), nameof(TimeText));
-        });
-    }
+    private void OnSessionPositionChanged(object? sender, PlaybackPositionChangedEventArgs args) =>
+        NotifySubscribers(PositionChanged, args, nameof(PositionChanged));
 
     /// <summary>
-    /// 将多个属性变更通知派发到界面上下文。
+    /// 通知实际状态变化，释放开始时也通知观察者。
     /// </summary>
-    private void RaiseProperties(params string[] propertyNames)
-    {
-        DispatchNotification(() => RaisePropertiesCore(propertyNames));
-    }
-
-    /// <summary>
-    /// 逐个触发属性变更事件。
-    /// </summary>
-    private void RaisePropertiesCore(params string[] propertyNames)
-    {
-        foreach (var propertyName in propertyNames)
-        {
-            var args = PropertyChangedArgs.GetOrAdd(propertyName, static name => new PropertyChangedEventArgs(name));
-            if (PropertyChanged is null) continue;
-            foreach (PropertyChangedEventHandler handler in PropertyChanged.GetInvocationList())
-            {
-                try
-                {
-                    handler(this, args);
-                }
-                catch (Exception exception)
-                {
-                    FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId, "Event=PropertyChangedSubscriberFailed", exception);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// 在创建播放器时捕获的线程上下文中通知界面。
-    /// </summary>
-    private void DispatchNotification(Action notification)
-    {
-        if (_disposed) return;
-        var context = _notificationContext;
-        if (context is null || ReferenceEquals(context, SynchronizationContext.Current))
-        {
-            notification();
-            return;
-        }
-
-        context.Post(static state =>
-        {
-            var (owner, action) = ((Player, Action))state!;
-            if (!owner._disposed) action();
-        }, (this, notification));
-    }
+    private void NotifyPlaybackChanged() =>
+        NotifySubscribers(PlaybackChanged, EventArgs.Empty, nameof(PlaybackChanged), allowDisposed: true);
 
     /// <summary>
     /// 隔离每个订阅者的异常，避免影响其它显示端或通知。
     /// </summary>
-    private void NotifySubscribers<TEvent>(EventHandler<TEvent>? handlers, TEvent value, string eventName)
+    private void NotifySubscribers<TEvent>(EventHandler<TEvent>? handlers, TEvent value, string eventName, bool allowDisposed = false)
     {
-        if (handlers is null || _disposed) return;
+        if (handlers is null || _disposed && !allowDisposed) return;
         foreach (EventHandler<TEvent> handler in handlers.GetInvocationList())
         {
             try { handler(this, value); }
@@ -788,39 +509,6 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         }
     }
 
-    /// <summary>
-    /// 用会话中的实际进度更新绑定值。
-    /// </summary>
-    private void RefreshPositionFromSession()
-    {
-        _positionSeconds = _session.CurrentTime.TotalSeconds;
-        _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
-        RaiseProperties(nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
-    }
-
-    /// <summary>
-    /// 更新录制状态相关的绑定属性。
-    /// </summary>
-    private void RaiseRecordingProperties() => RaiseProperties(nameof(Recording), nameof(RecordingState), nameof(IsRecording));
-
-    /// <summary>
-    /// 刷新媒体信息和进度绑定属性。
-    /// </summary>
-    private void RefreshMediaProperties()
-    {
-        _positionSeconds = _session.CurrentTime.TotalSeconds;
-        _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
-        RaiseProperties(nameof(Source), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
-    }
-
-    /// <summary>
-    /// 将媒体时间格式化为时分秒。
-    /// </summary>
-    private static string FormatTime(TimeSpan value)
-    {
-        var totalHours = (long)value.TotalHours;
-        return $"{totalHours:00}:{value.Minutes:00}:{value.Seconds:00}";
-    }
     /// <summary>
     /// 序列化普通命令；跳转请求由专用调度器负责合并。
     /// </summary>
@@ -840,34 +528,6 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
         await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try { ThrowIfDisposed(); await command(cancellationToken).ConfigureAwait(false); }
         finally { _commandGate.Release(); }
-    }
-    /// <summary>
-    /// 跟踪绑定请求，失败时恢复到实际播放位置。
-    /// </summary>
-    private async Task ApplyBindingSeekAsync(double seconds)
-    {
-        if (Interlocked.Increment(ref _bindingSeekPending) == 1) RaiseProperties(nameof(IsSeeking));
-        try
-        {
-            FluxMediaLog.Write(LogLevel.Information, nameof(Player), InstanceId, $"Event=SeekBindingSubmitted TargetSeconds={seconds} IsLive={IsLive}");
-            var result = await SeekAsync(TimeSpan.FromSeconds(seconds), _bindingSeekCts.Token).ConfigureAwait(false);
-            if (!result.IsSuccess)
-                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId, $"Event=SeekBindingFailed TargetSeconds={seconds} Error={result.Error}");
-        }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) when (_disposed) { }
-        catch (Exception exception)
-        {
-            FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId, $"Event=SeekBindingFailed TargetSeconds={seconds} ExceptionType={exception.GetType().Name}");
-        }
-        finally
-        {
-            if (Interlocked.Decrement(ref _bindingSeekPending) == 0 && !_disposed)
-            {
-                RefreshPositionFromSession();
-                RaiseProperties(nameof(IsSeeking));
-            }
-        }
     }
     /// <summary>
     /// 释放开始后拒绝新命令。

@@ -32,12 +32,13 @@ private async Task AddAsync(string source)
               xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
               xmlns:flux="clr-namespace:FluxMedia.Avalonia;assembly=FluxMedia.Avalonia"
               xmlns:playback="clr-namespace:FluxMedia.Playback;assembly=FluxMedia.Playback"
+              xmlns:presentation="clr-namespace:FluxMedia.Avalonia.Bindings;assembly=FluxMedia.Avalonia"
               ItemsSource="{Binding Players}">
     <ItemsControl.ItemTemplate>
         <DataTemplate x:DataType="playback:Player">
             <flux:FluxPlayerControl Player="{Binding}" Height="360">
                 <flux:FluxPlayerControl.ControlBarTemplate>
-                    <DataTemplate x:DataType="playback:Player">
+                    <DataTemplate x:DataType="presentation:PlayerBinding">
                         <Border VerticalAlignment="Bottom" Padding="10" Background="#CC182030">
                             <StackPanel Spacing="8">
                                 <Slider Minimum="0" Maximum="{Binding DurationSeconds}"
@@ -64,7 +65,10 @@ private async Task AddAsync(string source)
 
 ## 基础操作
 
-ControlBarTemplate 的数据是 Player，进度、音量、静音、倍速和能力直接绑定它的属性。
+ControlBarTemplate 的数据是 `FluxMedia.Avalonia.Bindings.PlayerBinding`，进度、音量、静音、倍速和能力绑定它的属性。
+控件创建并管理该适配器，外部仍直接绑定 Player，无须另外维护集合或视图模型。
+`FluxPlayerControl.Presentation` 暴露当前绑定对象，模板外可绑定 `#PlaybackControl.Presentation.State` 等属性。
+绑定对象保存拖动预览；真实位置从其 Player.Position 或核心进度事件读取。
 命令通过父级 FluxPlayerControl 获取，无须使用方包装播放器集合项。
 不提供控制栏模板时，只显示画面和使用方覆盖内容，不生成按钮或播放器文本。
 
@@ -83,8 +87,8 @@ ControlBarTemplate 的数据是 Player，进度、音量、静音、倍速和能
 ## 自定义倍速档位
 
 `PlaybackSpeeds` 可直接赋值或绑定使用方列表。未设置或绑定值为 null 时采用
-`Player.DefaultSpeeds`：0.5、0.75、1、1.25、1.5、2、3、4。
-列表只是界面候选项，实际倍速由 `Player.Speed` 或 `SetSpeedAsync` 设置。
+`FluxPlayerControl.DefaultSpeeds`：0.5、0.75、1、1.25、1.5、2、3、4。
+列表只是界面候选项，双向赋值使用 `PlayerBinding.Speed`，业务调用使用 `Player.SetSpeedAsync`。
 实际允许范围由 FluxEngineOptions 在启动时统一配置，默认 0.1～10，音频级数自动推算为四级；列表不绕过范围和直播权限。
 控件和 Sample 不另设倍速边界，越界由核心返回失败，界面回读实际速度并显示操作错误。
 
@@ -104,9 +108,10 @@ playbackControl.ClearValue(FluxPlayerControl.PlaybackSpeedsProperty);
 ```
 
 用户档位中的非法值仍由核心拒绝，直播不能绕过倍速限制。
-控件订阅 Player 的换速通知，`IsSpeedChangePending` 可用于显示等待状态；倍速选择器直接绑定 Player，不依赖控件命令返回值。
-`Player.Speed` 是已应用速度，`RequestedSpeed` 是目标；Accepted、应用成功、失败及 Seek 作废都会刷新绑定。
-操作错误通过 `Player.LastSpeedError` 展示，界面语言和文案仍由使用方决定。
+绑定赋值先检查 CanChangeSpeed，不允许变速时回读实际值，不提交命令；直接调用 Player.SetSpeedAsync 仍由核心完整校验并返回失败结果。
+绑定对象订阅核心 PlaybackChanged 并合并 UI 派发，`IsSpeedChangePending` 可用于显示等待状态；倍速选择器绑定 PlayerBinding。
+`PlayerBinding.Speed` 读取核心已应用速度，`RequestedSpeed` 是目标；Accepted、应用成功、失败及 Seek 作废都会刷新绑定。
+操作错误通过 `PlayerBinding.LastSpeedError` 展示，界面语言和文案仍由使用方决定。
 
 ## 控制栏显隐
 
@@ -144,9 +149,20 @@ Sample 演示同一个控件铺满窗口并支持 Escape 退出，未创建第�
 Sample 的文件选择、录制、诊断及按钮文字都属于示例，不是类库内置界面。
 
 卸载控件只停止自身计时和订阅，视频显示层释放显示资源，Player 继续由应用管理。
+卸载或替换 Player 时释放旧 PlayerBinding，排队通知与异步完成不再更新旧界面；已提交的核心操作继续由 Player 管理。
+使用方自行 new PlayerBinding(player) 时，应在 UI 线程创建，并在结束使用时调用 Dispose，以解除 Player 的事件订阅；播放器仍由其所有者释放。
 替换 Player 时同步更新显示、控制栏数据和状态订阅。
 整体替换标准 Template 时，可沿用 PART_VideoView、PART_ControlsHost、PART_OverlayHost 三个部件名。
 部件类型分别为 FluxPlayerView、ContentPresenter、ContentPresenter；可选的 PART_Root 使用 Grid 承接背景。
 每次应用模板都会同步现有 Player、Stretch、背景、覆盖内容及其模板、控制栏模板和显示状态。
 同步使用 SetCurrentValue 保留部件上的绑定；替换模板本身不会强制展开原本隐藏的控制栏。
 通常只需提供 ControlBarTemplate 或 OverlayContent，无须重写显示逻辑。
+
+## 绑定迁移
+
+1.1.5 包含公开 API 与绑定契约变更，升级旧版本的调用方需要同步调整以下入口。
+
+自定义 ControlBarTemplate 的 x:DataType 从 playback:Player 改为 presentation:PlayerBinding。
+PositionSeconds、DurationSeconds、TimeText、Speed、Volume、IsMuted 等模板绑定名称保持不变。
+Player 不再实现 INotifyPropertyChanged，不再提供秒数、时间文本、界面默认档位或属性赋值控制入口。
+非 UI 调用方使用 SeekAsync、SetSpeedAsync、SetVolumeAsync、SetMutedAsync，读取核心只读状态并订阅事件。

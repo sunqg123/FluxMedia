@@ -3,6 +3,7 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:flux="clr-namespace:FluxMedia.Avalonia;assembly=FluxMedia.Avalonia"
     xmlns:playback="clr-namespace:FluxMedia.Playback;assembly=FluxMedia.Playback"
+    xmlns:presentation="clr-namespace:FluxMedia.Avalonia.Bindings;assembly=FluxMedia.Avalonia"
     xmlns:vm="clr-namespace:FluxMedia.Avalonia.Sample.ViewModels"
     xmlns:conv="using:Avalonia.Data.Converters"
     x:Class="FluxMedia.Avalonia.Sample.Views.PlayerItemView"
@@ -86,7 +87,7 @@
         <!-- 示例控制栏，样式与文字不进入类库。 -->
         <DataTemplate
             x:Key="StandardControlBar"
-            x:DataType="playback:Player">
+            x:DataType="presentation:PlayerBinding">
             <Border
                 VerticalAlignment="Bottom"
                 Padding="14,12,14,10">
@@ -279,7 +280,7 @@
         </DataTemplate>
         <DataTemplate
             x:Key="CompactControlBar"
-            x:DataType="playback:Player">
+            x:DataType="presentation:PlayerBinding">
             <Border
                 VerticalAlignment="Bottom"
                 Margin="12"
@@ -382,9 +383,9 @@
                                 Height="5"
                                 VerticalAlignment="Center"
                                 Fill="#5AA2FF"
-                                IsVisible="{Binding IsPlaying}" />
+                                IsVisible="{Binding #PlaybackControl.Presentation.IsPlaying}" />
                             <TextBlock
-                                Text="{Binding State}"
+                                Text="{Binding #PlaybackControl.Presentation.State}"
                                 VerticalAlignment="Center"
                                 FontSize="10"
                                 Foreground="#9DB4D0" />

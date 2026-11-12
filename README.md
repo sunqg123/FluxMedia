@@ -76,6 +76,7 @@ await player.StopAsync();
 初始化失败或未初始化就创建播放器都会抛出异常，不会自动启动或重试。
 宿主退出时先释放播放器，再调用 `FluxEngine.ShutdownAsync`。
 自定义 UI 使用 `Player.CanSeek` 显示交互能力；直播的 Seek 在核心层同样被拒绝。
+Player 提供只读实际状态、异步命令和普通事件；Avalonia 的属性通知、时间显示和双向绑定由控件内部的 PlayerBinding 处理。
 
 ## 示例
 
