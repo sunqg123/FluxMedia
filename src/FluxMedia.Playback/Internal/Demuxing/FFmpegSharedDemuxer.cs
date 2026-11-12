@@ -72,6 +72,11 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     private readonly object _disposeSync = new();
 
     /// <summary>
+    /// 保护跨线程读取的状态、错误和最近包时刻。
+    /// </summary>
+    private readonly object _diagnosticSync = new();
+
+    /// <summary>
     /// 录制开始前缓存的关键帧及后续数据包。
     /// </summary>
     private readonly List<FFmpegPacketLease> _recordingPrerollPackets = new();
@@ -144,10 +149,10 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 是否已请求释放解复用器。
     /// </summary>
-    private bool _disposed;
+    private volatile bool _disposed;
 
     /// <summary>
-    /// 包队列和流参数是否已完成清理。
+    /// 是否已进入单次资源清理。
     /// </summary>
     private bool _resourcesDisposed;
 
@@ -194,6 +199,11 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     public FFmpegStreamDescriptor? AudioStream { get; private set; }
 
     /// <summary>
+    /// 媒体信息就绪后确定的基础时序模式。
+    /// </summary>
+    public PlaybackTimingMode TimingMode { get; private set; } = PlaybackTimingMode.Auto;
+
+    /// <summary>
     /// 视频数据包。
     /// </summary>
     public ChannelReader<FFmpegPacketLease> VideoPackets => _videoPackets.Reader;
@@ -206,17 +216,32 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 读取数据包数量。
     /// </summary>
-    public long ReadPacketCount { get; private set; }
+    public long ReadPacketCount => Interlocked.Read(ref _readPacketCount);
+
+    /// <summary>
+    /// 原生读取成功的数据包数。
+    /// </summary>
+    private long _readPacketCount;
 
     /// <summary>
     /// 已分发视频包数量。
     /// </summary>
-    public long RoutedVideoPacketCount { get; private set; }
+    public long RoutedVideoPacketCount => Interlocked.Read(ref _routedVideoPacketCount);
+
+    /// <summary>
+    /// 已送入视频队列的数据包数。
+    /// </summary>
+    private long _routedVideoPacketCount;
 
     /// <summary>
     /// 已分发音频包数量。
     /// </summary>
-    public long RoutedAudioPacketCount { get; private set; }
+    public long RoutedAudioPacketCount => Interlocked.Read(ref _routedAudioPacketCount);
+
+    /// <summary>
+    /// 已送入音频队列的数据包数。
+    /// </summary>
+    private long _routedAudioPacketCount;
 
     /// <summary>
     /// 已丢弃视频包数量。
@@ -256,32 +281,60 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 录制诊断。
     /// </summary>
-    public PlaybackRecordingDiagnosticInfo? RecordingDiagnostic => _recording?.Diagnostic;
+    public PlaybackRecordingDiagnosticInfo? RecordingDiagnostic
+    {
+        get { lock (_recordingSync) return _recording?.Diagnostic; }
+    }
 
     /// <summary>
     /// 最近数据包时刻。
     /// </summary>
-    public DateTimeOffset? LastPacketAt => _lastPacketAt;
+    public DateTimeOffset? LastPacketAt { get { lock (_diagnosticSync) return _lastPacketAt; } }
 
     /// <summary>
     /// 当前运行状态。
     /// </summary>
-    public string? State => _state;
+    public string? State { get { lock (_diagnosticSync) return _state; } }
 
     /// <summary>
     /// 退出原因。
     /// </summary>
-    public string? ExitReason => _exitReason;
+    public string? ExitReason { get { lock (_diagnosticSync) return _exitReason; } }
 
     /// <summary>
     /// 最近错误。
     /// </summary>
-    public string? LastError => _lastError;
+    public string? LastError { get { lock (_diagnosticSync) return _lastError; } }
 
     /// <summary>
     /// 读取超时数量。
     /// </summary>
     public int ReadTimeoutCount => Volatile.Read(ref _readTimeoutCount);
+
+    /// <summary>
+    /// 一次读取运行状态；各包计数使用原子读取。
+    /// </summary>
+    public PlaybackNetworkDiagnosticInfo GetNetworkDiagnostic()
+    {
+        lock (_diagnosticSync)
+        {
+            return new PlaybackNetworkDiagnosticInfo
+            {
+                IsNetworkSource = _source.Kind == MediaSourceKind.NetworkStream,
+                ReadTimeoutCount = ReadTimeoutCount,
+                LastPacketAt = _lastPacketAt,
+                DemuxerState = _state,
+                DemuxerExitReason = _exitReason,
+                LastNetworkError = _lastError,
+                DroppedVideoPacketCount = _videoPackets.DroppedPackets,
+                DroppedAudioPacketCount = _audioPackets.DroppedPackets,
+                SeekDiscardedVideoPacketCount = _videoPackets.SeekDiscardedPackets,
+                SeekDiscardedAudioPacketCount = _audioPackets.SeekDiscardedPackets,
+                StopDiscardedVideoPacketCount = _videoPackets.StopDiscardedPackets,
+                StopDiscardedAudioPacketCount = _audioPackets.StopDiscardedPackets
+            };
+        }
+    }
 
     /// <summary>
     /// 媒体信息。
@@ -316,9 +369,12 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 
         _lifetimeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ready = new TaskCompletionSource<bool>();
-        _state = "Starting";
-        _exitReason = null;
-        _lastError = null;
+        lock (_diagnosticSync)
+        {
+            _state = "Starting";
+            _exitReason = null;
+            _lastError = null;
+        }
         _demuxTask = Task.Run(() => DemuxLoop(_lifetimeCts.Token), CancellationToken.None);
         return _demuxTask;
     }
@@ -343,7 +399,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 跳转到指定媒体时间。
     /// </summary>
-    public ValueTask<TimeSpan> SeekAsync(TimeSpan target, CancellationToken cancellationToken = default)
+    public ValueTask SeekAsync(TimeSpan target, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
@@ -356,7 +412,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         if (_demuxTask.IsCompleted)
         {
             var exception = _demuxTask.Exception?.GetBaseException() ?? new InvalidOperationException("The demuxer is no longer running.");
-            return new ValueTask<TimeSpan>(Task.FromException<TimeSpan>(exception));
+            return new ValueTask(Task.FromException(exception));
         }
 
         var request = new DemuxSeekRequest(target);
@@ -371,7 +427,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             _ = request.Task.ContinueWith(static (_, state) => ((CancellationTokenRegistration)state!).Dispose(), registration, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
         }
 
-        return new ValueTask<TimeSpan>(request.Task);
+        return new ValueTask(request.Task);
     }
 
     /// <summary>
@@ -379,7 +435,11 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// </summary>
     public void Stop()
     {
-        _lifetimeCts?.Cancel();
+        try { _lifetimeCts?.Cancel(); }
+        catch (Exception exception)
+        {
+            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegSharedDemuxer), _instanceId, "Event=DemuxerCancelFailed", exception);
+        }
         CompletePendingSeekRequests(new OperationCanceledException("The demuxer has been stopped."));
         _videoPackets.Complete();
         _audioPackets.Complete();
@@ -406,7 +466,15 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         }
 
         // 原生读取可能尚未退出，等线程结束后再释放队列和流参数。
-        _ = demuxTask.ContinueWith(static (_, state) => ((FFmpegSharedDemuxer)state!).DisposeResources(), this, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+        _ = demuxTask.ContinueWith(static (_, state) =>
+        {
+            var demuxer = (FFmpegSharedDemuxer)state!;
+            try { demuxer.DisposeResources(); }
+            catch (Exception exception)
+            {
+                FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegSharedDemuxer), demuxer._instanceId, "Event=DeferredDemuxerCleanupFailed", exception);
+            }
+        }, this, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
 
     /// <summary>
@@ -420,20 +488,29 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             _resourcesDisposed = true;
         }
 
-        _videoPackets.Dispose();
-        _audioPackets.Dispose();
-        _readGate.Dispose();
+        var errors = new List<Exception>();
+        Release(_videoPackets.Dispose);
+        Release(_audioPackets.Dispose);
+        Release(_readGate.Dispose);
         FFmpegPacketRemuxRecorder? recording;
         lock (_recordingSync)
         {
             recording = _recording;
             _recording = null;
-            ClearRecordingPreroll();
         }
-        recording?.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        VideoStream?.Dispose();
-        AudioStream?.Dispose();
-        _lifetimeCts?.Dispose();
+        Release(() => { lock (_recordingSync) ClearRecordingPreroll(); });
+        Release(() => recording?.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        Release(() => VideoStream?.Dispose());
+        Release(() => AudioStream?.Dispose());
+        Release(() => _lifetimeCts?.Dispose());
+        if (errors.Count > 0) throw new AggregateException("解复用资源释放失败。", errors);
+
+        // 每项资源均尝试清理，最后统一报告异常。
+        void Release(Action release)
+        {
+            try { release(); }
+            catch (Exception exception) { errors.Add(exception); }
+        }
     }
 
     /// <summary>
@@ -451,7 +528,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 
         try
         {
-            _state = "Opening";
+            lock (_diagnosticSync) _state = "Opening";
             interrupt = PlaybackFFmpegOptions.CreateInterruptContext(_source.Kind == MediaSourceKind.NetworkStream ? PlaybackFFmpegOptions.EffectiveOpenTimeout(_options) : _options.OpenTimeout, cancellationToken);
             dictionary = PlaybackFFmpegOptions.CreateOpenDictionary(_source, _options, _instanceId);
             formatContext = ffmpeg.avformat_alloc_context();
@@ -480,6 +557,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             AudioStream = FindStream(formatContext, AVMediaType.AVMEDIA_TYPE_AUDIO);
             MediaInfo = FFmpegMediaInfoReader.BuildMediaInfo(formatContext);
             var timingMode = PlaybackTimingPolicy.Resolve(_source, _options, MediaInfo.Duration);
+            TimingMode = timingMode;
             _dropPacketsForLowLatency = PlaybackTimingPolicy.IsLiveNetworkSource(_source, MediaInfo.Duration) && _options.Network.LowLatencyMode && timingMode == PlaybackTimingMode.RealtimeLowLatency;
             OpenDiagnostic = new PlaybackDiagnosticInfo
             {
@@ -488,7 +566,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                 FFmpegOpenOptions = PlaybackFFmpegOptions.Describe(_source, _options),
                 OpenElapsed = openElapsed,
                 StreamInfoElapsed = streamInfoElapsed,
-                Protocol = Uri.TryCreate(_source.Uri, UriKind.Absolute, out var sourceUri) ? sourceUri.Scheme : _source.Kind.ToString(),
+                Protocol = MediaSourcePolicy.GetProtocol(_source),
                 Container = MediaInfo.ContainerFormat,
                 FrameRate = MediaInfo.VideoFrameRate,
                 TimingMode = timingMode,
@@ -508,8 +586,8 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             }
 
             StartPendingRecordingIfNeeded();
+            lock (_diagnosticSync) _state = "Running";
             _ready?.TrySetResult(true);
-            _state = "Running";
             var readGateStartedAt = Stopwatch.GetTimestamp();
             FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxReadGateWaiting DeferredPacketReading={_deferPacketReading}");
             _readGate.Wait(cancellationToken);
@@ -517,12 +595,8 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 
             if (_startPosition > TimeSpan.Zero)
             {
-                EnsureSeekable();
-                var seekTarget = (long)(_startPosition.TotalSeconds * ffmpeg.AV_TIME_BASE);
-                var seekResult = ffmpeg.av_seek_frame(formatContext, -1, seekTarget, ffmpeg.AVSEEK_FLAG_BACKWARD);
-                FluxMediaLog.Write(seekResult < 0 ? LogLevel.Warning : LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxSeek Target={_startPosition} Result={seekResult} FFmpegErrorText={FormatError(seekResult) ?? "-"}");
-                FFmpegErrorHelper.ThrowIfError(seekResult, "av_seek_frame");
-                Interlocked.Increment(ref _packetGeneration);
+                interrupt.ResetDeadline();
+                SeekFormatContext(formatContext, _startPosition);
             }
 
             if (_source.Kind == MediaSourceKind.NetworkStream)
@@ -542,6 +616,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             var firstPacketLogged = false;
             var firstVideoPacketLogged = false;
             var firstVideoKeyPacketLogged = false;
+            Func<bool> seekPending = () => !_seekRequests.IsEmpty;
             while (!_disposed && !cancellationToken.IsCancellationRequested)
             {
                 while (_seekRequests.TryDequeue(out var seek))
@@ -549,11 +624,12 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                     if (seek.IsCompleted) continue;
                     try
                     {
-                        var actual = SeekFormatContext(formatContext, seek.Target);
+                        interrupt.ResetDeadline();
+                        SeekFormatContext(formatContext, seek.Target);
                         _videoPackets.Clear();
                         _audioPackets.Clear();
                         ffmpeg.avformat_flush(formatContext);
-                        seek.TrySetResult(actual);
+                        seek.TrySetResult();
                     }
                     catch (Exception ex)
                     {
@@ -561,35 +637,59 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                     }
                 }
 
-                interrupt.ResetDeadline();
-                var read = ffmpeg.av_read_frame(formatContext, packet);
+                int read;
+                interrupt.BeginRead(seekPending);
+                try
+                {
+                    do
+                    {
+                        read = ffmpeg.av_read_frame(formatContext, packet);
+                        if (read != ffmpeg.AVERROR(ffmpeg.EAGAIN) || interrupt.ShouldInterrupt()) break;
+                        cancellationToken.WaitHandle.WaitOne(2);
+                    } while (true);
+                }
+                finally { interrupt.EndRead(); }
                 if (read < 0)
                 {
+                    if (interrupt.ReadInterrupted && !cancellationToken.IsCancellationRequested && !_disposed)
+                    {
+                        // 主动跳转不触发断流恢复，清除本次中断留下的 IO 错误。
+                        if (formatContext->pb != null)
+                        {
+                            formatContext->pb->error = 0;
+                            formatContext->pb->eof_reached = 0;
+                        }
+                        ffmpeg.av_packet_unref(packet);
+                        FluxMediaLog.Write(LogLevel.Debug, nameof(FFmpegSharedDemuxer), _instanceId, "Event=ReadInterruptedForSeek");
+                        continue;
+                    }
                     var timedOut = interrupt.TimedOut && !cancellationToken.IsCancellationRequested && !_disposed;
-                    exitReason = cancellationToken.IsCancellationRequested || _disposed ? "Canceled" : timedOut ? "ReadTimeout" : $"av_read_frame returned {read}";
+                    if (cancellationToken.IsCancellationRequested || _disposed)
+                    {
+                        exitReason = "Canceled";
+                        break;
+                    }
+                    exitReason = timedOut ? "ReadTimeout" : $"av_read_frame returned {read}";
                     if (timedOut)
                     {
                         Interlocked.Increment(ref _readTimeoutCount);
-                        _lastError = exitReason;
+                        lock (_diagnosticSync) _lastError = exitReason;
                         throw new TimeoutException($"FFmpeg shared demux read timed out: {_source.Uri}");
                     }
 
-                    if (_source.Kind == MediaSourceKind.NetworkStream && !cancellationToken.IsCancellationRequested && !_disposed)
+                    if (read == ffmpeg.AVERROR_EOF && !PlaybackTimingPolicy.IsLiveNetworkSource(_source, MediaInfo.Duration))
                     {
-                        _lastError = exitReason;
-                        // 直播断线也可能返回 EOF，不能当作正常播放结束。
-                        if (read != ffmpeg.AVERROR_EOF || PlaybackTimingPolicy.IsLiveNetworkSource(_source, MediaInfo.Duration))
-                        {
-                            throw new IOException($"Network media read interrupted ({read}).");
-                        }
+                        exitReason = "Completed";
+                        break;
                     }
-                    break;
+                    // 直播 EOF 和非 EOF 读取错误均不能伪装为自然结束。
+                    throw new IOException($"Media read interrupted ({read}): {FormatError(read)}");
                 }
 
                 try
                 {
-                    ReadPacketCount++;
-                    _lastPacketAt = DateTimeOffset.UtcNow;
+                    Interlocked.Increment(ref _readPacketCount);
+                    lock (_diagnosticSync) _lastPacketAt = DateTimeOffset.UtcNow;
                     if (!firstPacketLogged)
                     {
                         firstPacketLogged = true;
@@ -613,14 +713,14 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 
                         if (RoutePacketWithBackpressure(_videoPackets, FFmpegPacketLease.Clone(packet, PacketGeneration), cancellationToken))
                         {
-                            RoutedVideoPacketCount++;
+                            Interlocked.Increment(ref _routedVideoPacketCount);
                         }
                     }
                     else if (AudioStream is not null && packet->stream_index == AudioStream.StreamIndex)
                     {
                         if (RoutePacketWithBackpressure(_audioPackets, FFmpegPacketLease.Clone(packet, PacketGeneration), cancellationToken))
                         {
-                            RoutedAudioPacketCount++;
+                            Interlocked.Increment(ref _routedAudioPacketCount);
                         }
                     }
                 }
@@ -629,12 +729,22 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                     ffmpeg.av_packet_unref(packet);
                 }
             }
+            if (_disposed || cancellationToken.IsCancellationRequested) exitReason = "Canceled";
+        }
+        catch (Exception exception) when (cancellationToken.IsCancellationRequested || _disposed)
+        {
+            exitReason = "Canceled";
+            _ready?.TrySetCanceled();
+            throw new OperationCanceledException("媒体读取已取消。", exception, cancellationToken);
         }
         catch (Exception ex)
         {
             exitReason = ex.Message;
-            _state = "Faulted";
-            _lastError = ex.Message;
+            lock (_diagnosticSync)
+            {
+                _state = "Faulted";
+                _lastError = ex.Message;
+            }
             _ready?.TrySetException(ex);
             CompletePendingSeekRequests(ex);
             _videoPackets.Complete(ex);
@@ -645,10 +755,10 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         finally
         {
             CompletePendingSeekRequests(new OperationCanceledException("The demuxer has exited."));
-            _exitReason = exitReason;
-            if (_state != "Faulted")
+            lock (_diagnosticSync)
             {
-                _state = exitReason == "Completed" ? "Completed" : "Exited";
+                _exitReason = exitReason;
+                if (_state != "Faulted") _state = exitReason == "Completed" ? "Completed" : "Exited";
             }
             _videoPackets.Complete();
             _audioPackets.Complete();
@@ -684,7 +794,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 调用 FFmpeg 将媒体读取位置移到目标时间。
     /// </summary>
-    private TimeSpan SeekFormatContext(AVFormatContext* formatContext, TimeSpan target)
+    private void SeekFormatContext(AVFormatContext* formatContext, TimeSpan target)
     {
         EnsureSeekable();
         var seekTarget = (long)(target.TotalSeconds * ffmpeg.AV_TIME_BASE);
@@ -695,7 +805,6 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         var generation = Interlocked.Increment(ref _packetGeneration);
         FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId,
             $"Event=SeekPacketGeneration Generation={generation} Target={target}");
-        return target;
     }
 
     /// <summary>
@@ -714,13 +823,13 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             if (queue.TryWriteOrderedWithoutDrop(packet)) return true;
             if (!_seekRequests.IsEmpty)
             {
-                packet.Dispose();
+                queue.Discard(packet, forSeek: true);
                 return false;
             }
 
             Thread.Sleep(2);
         }
-        packet.Dispose();
+        queue.Discard(packet, forSeek: false);
         return false;
     }
 
@@ -826,19 +935,6 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 
         var seconds = stream->start_time * ffmpeg.av_q2d(stream->time_base);
         return double.IsNaN(seconds) || double.IsInfinity(seconds) ? TimeSpan.Zero : TimeSpan.FromSeconds(Math.Max(0, seconds));
-    }
-
-    /// <summary>
-    /// 清空音视频包队列。
-    /// </summary>
-    public void ClearBufferedPackets()
-    {
-        _videoPackets.Clear();
-        _audioPackets.Clear();
-        lock (_recordingSync)
-        {
-            ClearRecordingPreroll();
-        }
     }
 
     /// <summary>
@@ -1047,34 +1143,6 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         _recordingPrerollPackets.Clear();
         _recordingPrerollBytes = 0;
         _recordingPrerollVideoKeyUs = null;
-    }
-
-    /// <summary>
-    /// 停止录制并封装输出文件。
-    /// </summary>
-    public ValueTask<PlaybackRecordingDiagnosticInfo?> StopRecordingAsync(CancellationToken cancellationToken = default)
-    {
-        FFmpegPacketRemuxRecorder? recording;
-        lock (_recordingSync)
-        {
-            recording = _recording;
-        }
-        if (recording is null)
-        {
-            return new ValueTask<PlaybackRecordingDiagnosticInfo?>((PlaybackRecordingDiagnosticInfo?)null);
-        }
-
-        recording.StopAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
-        var diagnostic = recording.Diagnostic;
-        recording.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        lock (_recordingSync)
-        {
-            if (ReferenceEquals(_recording, recording))
-            {
-                _recording = null;
-            }
-        }
-        return new ValueTask<PlaybackRecordingDiagnosticInfo?>(diagnostic);
     }
 
     /// <summary>

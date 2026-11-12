@@ -17,7 +17,7 @@
     <DebugSymbols Condition="'$(Configuration)' != 'Debug'">false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PackageReleaseNotes>FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI. Architecture refactor: one FluxEngine player entry point, isolated playback pipeline ownership, unified seek and recording control, static logging, and removal of legacy Runtime and compatibility factories. Existing callers must migrate to FluxEngine.CreatePlayer.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): playback rates now default to the configurable 0.1-10 range. Bounds are configured globally in FluxEngineOptions and validated by Start. Audio filter stage counts are derived automatically from both bounds; MaxAudioTempoStages is read-only. Start rejects ranges requiring more than 16 stages. Calls outside that range are rejected; configure the bounds to migrate existing callers. Audio/video rate confirmation, seek interruption, recording finalization and resource cleanup fixes. SupportedSpeeds remains an obsolete alias of DefaultSpeeds. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
   </PropertyGroup>

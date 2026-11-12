@@ -100,6 +100,8 @@ internal sealed class PlaybackRecordingController
     /// </summary>
     public async ValueTask<PlaybackResult> StopAsync(FFmpegSharedDemuxer? demuxer, CancellationToken cancellationToken = default)
     {
+        // 接受停止前允许取消；开始封装后以文件的最终结果为准。
+        cancellationToken.ThrowIfCancellationRequested();
         if (!IsRecording) return PlaybackResult.Success();
         try
         {
@@ -107,18 +109,28 @@ internal sealed class PlaybackRecordingController
             {
                 var recorder = _detached;
                 _detached = null;
-                await recorder.DisposeAsync().ConfigureAwait(false);
-                _snapshot = recorder.Diagnostic;
+                try { await recorder.DisposeAsync().ConfigureAwait(false); }
+                finally { _snapshot = recorder.Diagnostic; }
             }
             else if (demuxer is not null)
-                _snapshot = await demuxer.StopRecordingAsync(cancellationToken).ConfigureAwait(false) ?? _snapshot;
+                _snapshot = await demuxer.StopRecordingAsync().ConfigureAwait(false) ?? _snapshot with
+                {
+                    State = PlaybackRecordingState.Failed,
+                    StoppedAt = DateTimeOffset.UtcNow,
+                    LastError = "停止录制时未找到活动录制器，无法确认最终结果。"
+                };
             else
                 _snapshot = _snapshot with { State = PlaybackRecordingState.Completed, StoppedAt = DateTimeOffset.UtcNow };
             return _snapshot.State == PlaybackRecordingState.Completed ? PlaybackResult.Success() : PlaybackResult.Failure(PlaybackError.RecordingFailed, _snapshot.LastError ?? "录制未能正常完成。");
         }
         catch (Exception exception)
         {
-            _snapshot = _snapshot with { State = PlaybackRecordingState.Failed, LastError = exception.Message };
+            _snapshot = _snapshot with
+            {
+                State = PlaybackRecordingState.Failed,
+                StoppedAt = DateTimeOffset.UtcNow,
+                LastError = exception.Message
+            };
             return PlaybackResult.Failure(PlaybackError.RecordingFailed, exception.Message);
         }
         finally { IsRecording = false; _pending = null; }

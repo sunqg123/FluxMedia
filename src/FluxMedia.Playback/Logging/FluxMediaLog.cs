@@ -117,7 +117,10 @@ public static class FluxMediaLog
     /// </summary>
     public static void SetSink(Action<LogLevel, string, Guid, string, Exception?> writer)
     {
-        if (writer is null) throw new ArgumentNullException(nameof(writer));
+        if (writer is null)
+        {
+            throw new ArgumentNullException(nameof(writer));
+        }
         ReplaceTarget(new DelegateLogSink(writer));
     }
 
@@ -126,7 +129,10 @@ public static class FluxMediaLog
     /// </summary>
     public static void SetSink(Action<LogLevel, string, string, Exception?> writer)
     {
-        if (writer is null) throw new ArgumentNullException(nameof(writer));
+        if (writer is null)
+        {
+            throw new ArgumentNullException(nameof(writer));
+        }
         SetSink((level, category, _, message, error) => writer(level, category, message, error));
     }
 
@@ -175,9 +181,15 @@ public static class FluxMediaLog
     /// </summary>
     public static void Write(LogLevel level, string module, Guid instanceId, string message, Exception? exception = null)
     {
-        if (!IsEnabledFor(level) || _dispatchDepth != 0) return;
+        if (!IsEnabledFor(level) || _dispatchDepth != 0)
+        {
+            return;
+        }
         var target = AcquireTarget();
-        if (target is null) return;
+        if (target is null)
+        {
+            return;
+        }
         _dispatchDepth++;
         try
         {
@@ -185,7 +197,7 @@ public static class FluxMediaLog
         }
         catch
         {
-            /* 日志失败不改变播放结果。 */
+            // 日志失败不改变播放结果。
         }
         finally
         {
@@ -199,9 +211,15 @@ public static class FluxMediaLog
     /// </summary>
     public static void Flush()
     {
-        if (_dispatchDepth != 0) return;
+        if (_dispatchDepth != 0)
+        {
+            return;
+        }
         var target = AcquireTarget();
-        if (target is null) return;
+        if (target is null)
+        {
+            return;
+        }
         _dispatchDepth++;
         try
         {
@@ -209,7 +227,7 @@ public static class FluxMediaLog
         }
         catch
         {
-            /* 刷新失败不影响主流程。 */
+            // 刷新失败不影响主流程。
         }
         finally
         {
@@ -238,7 +256,10 @@ public static class FluxMediaLog
     /// </summary>
     private static long ConfigureCore(LoggingOptions options)
     {
-        if (options is null) throw new ArgumentNullException(nameof(options));
+        if (options is null)
+        {
+            throw new ArgumentNullException(nameof(options));
+        }
         if (options.MinimumLevel < LogLevel.Trace || options.MinimumLevel > LogLevel.None)
         {
             throw new ArgumentOutOfRangeException(nameof(options));
@@ -277,7 +298,10 @@ public static class FluxMediaLog
     /// </summary>
     private static LogTarget? EnsureTargetLocked()
     {
-        if (_target.Sink is not null) return null;
+        if (_target.Sink is not null)
+        {
+            return null;
+        }
         var previous = Interlocked.Exchange(ref _target, new LogTarget(new FileFluxMediaLogSink(_fileOptions with { IsEnabled = true, MinimumLevel = LogLevel.Trace })));
         _generation++;
         return previous;
@@ -291,8 +315,14 @@ public static class FluxMediaLog
         while (true)
         {
             var target = Volatile.Read(ref _target);
-            if (target.Sink is null) return null;
-            if (target.TryRetain()) return target;
+            if (target.Sink is null)
+            {
+                return null;
+            }
+            if (target.TryRetain())
+            {
+                return target;
+            }
         }
     }
 
@@ -304,7 +334,10 @@ public static class FluxMediaLog
         LogTarget previous;
         lock (ConfigurationGate)
         {
-            if (expectedGeneration.HasValue && _generation != expectedGeneration.Value) return;
+            if (expectedGeneration.HasValue && _generation != expectedGeneration.Value)
+            {
+                return;
+            }
             Volatile.Write(ref _enabled, 0);
             previous = Interlocked.Exchange(ref _target, new LogTarget(null));
             _fileOptions = new LoggingOptions();

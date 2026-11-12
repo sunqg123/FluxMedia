@@ -13,7 +13,7 @@
     <DebugSymbols Condition="'$(Configuration)' != 'Debug'">false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PackageReleaseNotes>FluxMedia 1.1.1: smoother progress-bar seeking and the matching FluxMedia.Playback 1.1.1 dependency with lifecycle, performance, dependency propagation, and opt-in logging fixes.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): customizable playback controls and speed presets, template property synchronization, and idle-based control visibility.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <PackageReadmeFile>README.md</PackageReadmeFile>

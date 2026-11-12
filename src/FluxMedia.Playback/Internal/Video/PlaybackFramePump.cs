@@ -39,7 +39,13 @@ internal sealed class PlaybackFramePump : IDisposable
     /// </summary>
     public void Queue(VideoFrame frame)
     {
-        if (!frame.IsCurrent) { frame.Dispose(); _output.RecordDrop(); return; }
+        // 视频链路②接收：接管视频 Worker 发出的帧。
+        if (!frame.IsCurrent)
+        {
+            frame.Dispose();
+            _output.RecordDrop();
+            return;
+        }
         while (_input.Reader.TryRead(out var previous))
         {
             previous.Dispose();
@@ -68,6 +74,7 @@ internal sealed class PlaybackFramePump : IDisposable
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     if (!frame.IsCurrent) { _output.RecordDrop(); continue; }
+                    // 视频链路③转交：Hub 分发后调用会话发布回调。
                     await _output.PublishAsync(frame, _publish).ConfigureAwait(false);
                 }
                 finally { frame.Dispose(); }

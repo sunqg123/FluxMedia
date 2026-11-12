@@ -11,7 +11,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer
         /// <summary>
         /// 通知当前操作完成的信号。
         /// </summary>
-        private readonly TaskCompletionSource<TimeSpan> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<bool> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         /// <summary>
         /// 初始化解复用跳转请求所需的状态和资源。
@@ -34,12 +34,12 @@ internal sealed unsafe partial class FFmpegSharedDemuxer
         /// <summary>
         /// 任务。
         /// </summary>
-        public Task<TimeSpan> Task => _completion.Task;
+        public Task Task => _completion.Task;
 
         /// <summary>
         /// 尝试设置等待中的请求结果。
         /// </summary>
-        public void TrySetResult(TimeSpan position) => _completion.TrySetResult(position);
+        public void TrySetResult() => _completion.TrySetResult(true);
 
         /// <summary>
         /// 尝试用异常结束等待中的请求。

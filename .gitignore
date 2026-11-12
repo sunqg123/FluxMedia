@@ -2,7 +2,6 @@ bin/
 obj/
 .vs/
 .idea/
-TestResults/
 artifacts/
 [Ll]ogs/
 *.log

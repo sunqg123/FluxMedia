@@ -1,7 +1,54 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             x:Class="FluxMedia.Avalonia.Sample.App">
+             x:Class="FluxMedia.Avalonia.Sample.App"
+             RequestedThemeVariant="Dark">
   <Application.Styles>
     <FluentTheme />
+    <!-- 示例图标按钮：正常透明，悬停时突出命中区域。 -->
+    <Style Selector=":is(Button).icon">
+      <Setter Property="Width" Value="36" />
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="MinHeight" Value="0" />
+      <Setter Property="Padding" Value="8" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#E4ECF8" />
+      <Setter Property="CornerRadius" Value="6" />
+      <Setter Property="Template">
+        <ControlTemplate>
+          <Border Background="{TemplateBinding Background}"
+                  CornerRadius="{TemplateBinding CornerRadius}">
+            <ContentPresenter Content="{TemplateBinding Content}"
+                              ContentTemplate="{TemplateBinding ContentTemplate}"
+                              Padding="{TemplateBinding Padding}"
+                              HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                              VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"
+                              Foreground="{TemplateBinding Foreground}" />
+          </Border>
+        </ControlTemplate>
+      </Setter>
+    </Style>
+    <Style Selector=":is(Button).icon:pointerover">
+      <Setter Property="Background" Value="#20FFFFFF" />
+    </Style>
+    <Style Selector=":is(Button).icon:pressed">
+      <Setter Property="Background" Value="#35FFFFFF" />
+    </Style>
+    <Style Selector=":is(Button).icon:focus-visible">
+      <Setter Property="Background" Value="#304C75" />
+    </Style>
+    <Style Selector="ToggleButton.icon:checked">
+      <Setter Property="Background" Value="#304C75" />
+    </Style>
+    <Style Selector=":is(Button).icon:disabled">
+      <Setter Property="Opacity" Value="0.3" />
+    </Style>
+    <Style Selector=":is(Button).icon Path">
+      <Setter Property="HorizontalAlignment" Value="Center" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
   </Application.Styles>
 </Application>

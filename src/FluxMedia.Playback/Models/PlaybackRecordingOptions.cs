@@ -25,8 +25,4 @@ public sealed record PlaybackRecordingOptions
     /// </summary>
     public bool CreateOutputDirectory { get; init; } = true;
 
-    /// <summary>
-    /// 测试时模拟的录制写入上限（字节）。
-    /// </summary>
-    internal long? SimulatedWriteQuotaBytes { get; init; }
 }

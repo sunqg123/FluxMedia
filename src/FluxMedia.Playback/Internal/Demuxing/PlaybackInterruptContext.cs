@@ -35,6 +35,16 @@ internal sealed unsafe class PlaybackInterruptContext : IDisposable
     private long _deadlineTicks;
 
     /// <summary>
+    /// 仅在读包期间检查主动跳转请求。
+    /// </summary>
+    private Func<bool>? _readInterruptRequested;
+
+    /// <summary>
+    /// 当前读包是否被主动跳转中断。
+    /// </summary>
+    private volatile bool _readInterrupted;
+
+    /// <summary>
     /// 是否已释放资源。
     /// </summary>
     private bool _disposed;
@@ -64,6 +74,37 @@ internal sealed unsafe class PlaybackInterruptContext : IDisposable
     /// 是否已超时输出。
     /// </summary>
     public bool TimedOut => Stopwatch.GetTimestamp() > Interlocked.Read(ref _deadlineTicks);
+
+    /// <summary>
+    /// 区分主动跳转和网络超时。
+    /// </summary>
+    public bool ReadInterrupted => _readInterrupted;
+
+    /// <summary>
+    /// 读包开始时启用跳转中断并重置超时。
+    /// </summary>
+    public void BeginRead(Func<bool> interruptRequested)
+    {
+        _readInterrupted = false;
+        ResetDeadline();
+        Volatile.Write(ref _readInterruptRequested, interruptRequested);
+    }
+
+    /// <summary>
+    /// 定位和关闭阶段不受待处理跳转影响。
+    /// </summary>
+    public void EndRead() => Volatile.Write(ref _readInterruptRequested, null);
+
+    /// <summary>
+    /// 判断当前操作是否应退出，并记录主动读包中断。
+    /// </summary>
+    public bool ShouldInterrupt()
+    {
+        if (_cancellationToken.IsCancellationRequested || TimedOut) return true;
+        if (Volatile.Read(ref _readInterruptRequested)?.Invoke() != true) return false;
+        _readInterrupted = true;
+        return true;
+    }
 
     /// <summary>
     /// 按当前超时重新计算截止时间。
@@ -116,6 +157,6 @@ internal sealed unsafe class PlaybackInterruptContext : IDisposable
             return 0;
         }
 
-        return context._cancellationToken.IsCancellationRequested || context.TimedOut ? 1 : 0;
+        return context.ShouldInterrupt() ? 1 : 0;
     }
 }

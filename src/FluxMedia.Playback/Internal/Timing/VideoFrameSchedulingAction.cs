@@ -10,6 +10,10 @@ internal enum VideoFrameSchedulingAction
     /// </summary>
     Present,
     /// <summary>
+    /// 等待时钟推进后重新判断，不计为重新缓冲。
+    /// </summary>
+    Wait,
+    /// <summary>
     /// 缓冲。
     /// </summary>
     Buffer,

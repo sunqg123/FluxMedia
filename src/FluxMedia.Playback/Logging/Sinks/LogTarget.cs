@@ -29,7 +29,10 @@ internal sealed class LogTarget
         while (count > 0)
         {
             var actual = Interlocked.CompareExchange(ref _references, count + 1, count);
-            if (actual == count) return true;
+            if (actual == count)
+            {
+                return true;
+            }
             count = actual;
         }
         return false;
@@ -40,15 +43,20 @@ internal sealed class LogTarget
     /// </summary>
     public void Release()
     {
-        if (Interlocked.Decrement(ref _references) != 0) return;
+        if (Interlocked.Decrement(ref _references) != 0)
+        {
+            return;
+        }
         try
         {
             if (Sink is IDisposable disposable)
+            {
                 disposable.Dispose();
+            }
         }
         catch
         {
-            /* 清理日志资源不能中断播放器。 */
+            // 清理日志资源不能中断播放器。
         }
     }
 }

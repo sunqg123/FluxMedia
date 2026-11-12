@@ -8,7 +8,7 @@ internal static class PlaybackPacer
     /// <summary>
     /// 根据媒体时间和播放速度计算等待时长。
     /// </summary>
-    public static TimeSpan CalculateDelay(TimeSpan timestamp, TimeSpan fallbackFrameInterval, PlaybackTimingMode timingMode, ref TimeSpan? firstMediaTimestamp, ref DateTimeOffset? presentationStartedAt, DateTimeOffset now, double playbackRate)
+    public static TimeSpan CalculateDelay(TimeSpan timestamp, PlaybackTimingMode timingMode, ref TimeSpan? firstMediaTimestamp, ref DateTimeOffset? presentationStartedAt, DateTimeOffset now, double playbackRate)
     {
         if (timingMode == PlaybackTimingMode.RealtimeLowLatency)
         {
@@ -17,12 +17,14 @@ internal static class PlaybackPacer
         firstMediaTimestamp ??= timestamp;
         presentationStartedAt ??= now;
         var rate = PlaybackRatePolicy.Normalize(playbackRate);
-        var dueAt = presentationStartedAt.Value + TimeSpan.FromTicks((long)((timestamp - firstMediaTimestamp.Value).Ticks / rate));
-        var delay = dueAt - now;
-        if (delay <= TimeSpan.FromMilliseconds(2))
+        // 用时长差计算，避免极慢倍速生成超出日期范围的到期时间。
+        var seconds = (timestamp - firstMediaTimestamp.Value).TotalSeconds / rate
+            - (now - presentationStartedAt.Value).TotalSeconds;
+        if (seconds <= 0.002)
         {
             return TimeSpan.Zero;
         }
-        return delay > TimeSpan.FromMilliseconds(250) ? fallbackFrameInterval : delay;
+        // 慢放也必须等待完整时间，由调度器分段等待并重新读取倍速。
+        return PlaybackClock.MediaTime(seconds);
     }
 }

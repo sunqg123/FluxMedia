@@ -113,6 +113,16 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     public long DroppedPackets => Interlocked.Read(ref _droppedPackets);
 
     /// <summary>
+    /// 跳转时主动清理的数据包数。
+    /// </summary>
+    public long SeekDiscardedPackets => Interlocked.Read(ref _seekDiscardedPackets);
+
+    /// <summary>
+    /// 停止后未消费的数据包数。
+    /// </summary>
+    public long StopDiscardedPackets => Interlocked.Read(ref _stopDiscardedPackets);
+
+    /// <summary>
     /// 当前处理到的媒体时间。
     /// </summary>
     public TimeSpan CurrentTime
@@ -179,6 +189,16 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     private long _droppedPackets;
 
     /// <summary>
+    /// 因跳转失效的数据包数。
+    /// </summary>
+    private long _seekDiscardedPackets;
+
+    /// <summary>
+    /// 停止时归还的数据包数。
+    /// </summary>
+    private long _stopDiscardedPackets;
+
+    /// <summary>
     /// 设置数据包时间基、默认时长和时间起点。
     /// </summary>
     public void ConfigureTiming(AVRational timeBase, TimeSpan? fallbackPacketDuration = null, TimeSpan? timestampOrigin = null)
@@ -204,8 +224,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
             ThrowIfDisposed();
             if (_completed)
             {
-                packet.Dispose();
-                Interlocked.Increment(ref _droppedPackets);
+                Discard(packet, forSeek: false);
                 return false;
             }
             var keyPacket = (packet.Packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
@@ -263,18 +282,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     }
 
     /// <summary>
-    /// 按顺序写入，满队列时释放新包。
-    /// </summary>
-    public bool TryWriteOrdered(FFmpegPacketLease packet)
-    {
-        ThrowIfDisposed();
-        if (TryWriteOrderedWithoutDrop(packet)) return true;
-        packet.Dispose();
-        Interlocked.Increment(ref _droppedPackets);
-        return false;
-    }
-
-    /// <summary>
     /// 尝试按顺序写入，失败时由调用方处理数据包。
     /// </summary>
     public bool TryWriteOrderedWithoutDrop(FFmpegPacketLease packet)
@@ -289,7 +296,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     }
 
     /// <summary>
-    /// 清空缓存内容并重置相关状态。
+    /// 跳转时清空旧包，不计入缓冲策略丢包。
     /// </summary>
     public void Clear()
     {
@@ -300,11 +307,21 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
             while (_channel.Reader.TryRead(out var packet))
             {
                 OnPacketDequeued(packet);
-                packet.Dispose();
+                Discard(packet, forSeek: true);
             }
 
             ResetTimestamps();
         }
+    }
+
+    /// <summary>
+    /// 归还因跳转或停止而失效的数据包。
+    /// </summary>
+    public void Discard(FFmpegPacketLease packet, bool forSeek)
+    {
+        packet.Dispose();
+        if (forSeek) Interlocked.Increment(ref _seekDiscardedPackets);
+        else Interlocked.Increment(ref _stopDiscardedPackets);
     }
 
     /// <summary>
@@ -344,7 +361,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
             _channel.Writer.TryComplete();
             while (_channel.Reader.TryRead(out var packet))
             {
-                packet.Dispose();
+                Discard(packet, forSeek: false);
             }
             ResetTimestamps();
         }

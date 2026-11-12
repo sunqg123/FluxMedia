@@ -7,7 +7,7 @@ namespace FluxMedia.Playback.Internal.Audio;
 /// <summary>
 /// Windows NAudio 输出实现。
 /// </summary>
-internal sealed class NAudioPlaybackOutput : IAudioOutputDevice, IPooledAudioOutputDevice
+internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
 {
 
     /// <summary>
@@ -214,11 +214,6 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice, IPooledAudioOut
         var data = pcm.ToArray();
         Write(data, data.Length);
     }
-
-    /// <summary>
-    /// 写入数据供后续处理。
-    /// </summary>
-    void IPooledAudioOutputDevice.Write(byte[] pcm, int length) => Write(pcm, length);
 
     /// <summary>
     /// 写入数据供后续处理。

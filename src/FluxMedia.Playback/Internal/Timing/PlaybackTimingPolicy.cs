@@ -22,7 +22,13 @@ internal static class PlaybackTimingPolicy
     /// </summary>
     public static PlaybackTimingMode Resolve(MediaSource source, PlaybackOptions options, TimeSpan duration)
     {
-        if (options.Network.TimingMode != PlaybackTimingMode.Auto) return options.Network.TimingMode;
-        return source.Kind == MediaSourceKind.File || duration > TimeSpan.Zero ? PlaybackTimingMode.PresentationTimestamp : PlaybackTimingMode.RealtimeLowLatency;
+        var requested = options.Network.TimingMode;
+        if (requested is PlaybackTimingMode.PresentationTimestamp or PlaybackTimingMode.RealtimeLowLatency) return requested;
+        if (requested != PlaybackTimingMode.Auto)
+        {
+            throw new ArgumentOutOfRangeException(nameof(options.Network.TimingMode), requested, "时序模式不受支持。");
+        }
+        if (source.Kind == MediaSourceKind.File || duration > TimeSpan.Zero) return PlaybackTimingMode.PresentationTimestamp;
+        return options.Network.LowLatencyMode ? PlaybackTimingMode.RealtimeLowLatency : PlaybackTimingMode.PresentationTimestamp;
     }
 }

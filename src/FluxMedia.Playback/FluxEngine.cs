@@ -1,6 +1,7 @@
 using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Logging;
 using FluxMedia.FFmpeg.Native;
+using FluxMedia.Playback.Internal;
 
 namespace FluxMedia.Playback;
 
@@ -82,6 +83,7 @@ public static class FluxEngine
                 return;
             }
             var actual = options ?? new FluxEngineOptions();
+            PlaybackRatePolicy.ValidateOptions(actual);
             long? generation = null;
             try
             {
@@ -111,7 +113,7 @@ public static class FluxEngine
             if (_shutdownTask is not null) throw new InvalidOperationException("引擎正在关闭，不能创建播放器。");
             if (_options is null) throw new InvalidOperationException("引擎尚未初始化，请先调用 FluxEngine.Start。");
             var actual = options ?? new PlaybackOptions();
-            var player = new Player(new PlaybackSession(actual));
+            var player = new Player(new PlaybackSession(_options, actual));
             ActivePlayers.Add(player.InstanceId, player);
             return player;
         }
@@ -153,12 +155,14 @@ public static class FluxEngine
     /// </summary>
     private static async Task ShutdownCoreAsync(Player[] players, long? generation)
     {
+        var errors = new List<Exception>();
         try
         {
-            await Task.WhenAll(players.Select(player => player.DisposeAsync().AsTask())).ConfigureAwait(false);
-            FFmpegNativeRuntime.Shutdown();
-            FluxMediaLog.Flush();
-            if (generation.HasValue) FluxMediaLog.ShutdownIfCurrent(generation.Value);
+            try { await Task.WhenAll(players.Select(player => player.DisposeAsync().AsTask())).ConfigureAwait(false); }
+            catch (Exception exception) { errors.Add(exception); }
+            Release(FFmpegNativeRuntime.Shutdown);
+            Release(FluxMediaLog.Flush);
+            if (generation.HasValue) Release(() => FluxMediaLog.ShutdownIfCurrent(generation.Value));
         }
         finally
         {
@@ -169,6 +173,14 @@ public static class FluxEngine
                 _logGeneration = null;
                 _shutdownTask = null;
             }
+        }
+        if (errors.Count > 0) throw new AggregateException("引擎关闭期间发生资源释放错误。", errors);
+
+        // 播放器释放失败后仍关闭共享原生环境和日志。
+        void Release(Action release)
+        {
+            try { release(); }
+            catch (Exception exception) { errors.Add(exception); }
         }
     }
     /// <summary>

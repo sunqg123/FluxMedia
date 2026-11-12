@@ -18,26 +18,6 @@ internal sealed record PlaybackWorkerDiagnostics
     public string? SourceUrl { get; init; }
 
     /// <summary>
-    /// 打开配置。
-    /// </summary>
-    public string? OpenOptions { get; init; }
-
-    /// <summary>
-    /// 打开耗时。
-    /// </summary>
-    public TimeSpan? OpenElapsed { get; init; }
-
-    /// <summary>
-    /// 流信息耗时。
-    /// </summary>
-    public TimeSpan? StreamInfoElapsed { get; init; }
-
-    /// <summary>
-    /// 首次帧耗时。
-    /// </summary>
-    public TimeSpan? FirstFrameElapsed { get; init; }
-
-    /// <summary>
     /// 首次已解码帧耗时。
     /// </summary>
     public TimeSpan? FirstDecodedFrameElapsed { get; init; }
@@ -46,11 +26,6 @@ internal sealed record PlaybackWorkerDiagnostics
     /// 协议。
     /// </summary>
     public string? Protocol { get; init; }
-
-    /// <summary>
-    /// 容器。
-    /// </summary>
-    public string? Container { get; init; }
 
     /// <summary>
     /// 帧率。
@@ -98,7 +73,7 @@ internal sealed record PlaybackWorkerDiagnostics
     public TimeSpan? LastVideoBufferedDuration { get; init; }
 
     /// <summary>
-    /// 是否低延迟捕获完成当前。
+    /// 是否正在低延迟追赶。
     /// </summary>
     public bool LowLatencyCatchUpActive { get; init; }
 
@@ -113,17 +88,12 @@ internal sealed record PlaybackWorkerDiagnostics
     public TimeSpan? LastAudioClock { get; init; }
 
     /// <summary>
-    /// 已丢弃非视频包数量。
-    /// </summary>
-    public long DroppedNonVideoPacketCount { get; init; }
-
-    /// <summary>
     /// 最近帧时刻。
     /// </summary>
     public DateTimeOffset? LastFrameAt { get; init; }
 
     /// <summary>
-    /// 是否工作线程运行中。
+    /// 解码线程是否运行中。
     /// </summary>
     public bool WorkerRunning { get; init; }
 
@@ -133,17 +103,12 @@ internal sealed record PlaybackWorkerDiagnostics
     public string? ExitReason { get; init; }
 
     /// <summary>
-    /// 最近 FFmpeg 错误代码。
-    /// </summary>
-    public int? LastFFmpegErrorCode { get; init; }
-
-    /// <summary>
     /// 最近 FFmpeg 错误。
     /// </summary>
     public string? LastFFmpegError { get; init; }
 
     /// <summary>
-    /// 是否硬件加速请求。
+    /// 是否请求硬件加速。
     /// </summary>
     public bool HardwareAccelerationRequested { get; init; }
 

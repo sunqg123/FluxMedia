@@ -1,102 +1,538 @@
-<UserControl xmlns="https://github.com/avaloniaui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:flux="clr-namespace:FluxMedia.Avalonia;assembly=FluxMedia.Avalonia"
-             xmlns:vm="clr-namespace:FluxMedia.Avalonia.Sample.ViewModels"
-             x:Class="FluxMedia.Avalonia.Sample.Views.PlayerItemView"
-             x:DataType="vm:PlayerItemViewModel">
-    <Border Width="590"
-            MinHeight="520"
-            Margin="7"
-            Padding="12"
-            CornerRadius="8"
-            Background="#F8FAFC"
-            BorderBrush="#374151"
-            BorderThickness="1">
-        <Grid RowDefinitions="Auto,310,Auto,Auto,Auto,Auto,*" RowSpacing="9">
-            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" />
-                    <TextBlock Text="{Binding StateText}" VerticalAlignment="Center" Foreground="#4B5563" />
-                </StackPanel>
-                <Button Grid.Column="1"
-                        Content="Remove"
-                        Command="{Binding RemoveCommand}"
-                        IsEnabled="{Binding CanRemove}" />
-            </Grid>
-
-            <Border Grid.Row="1" Background="Black" CornerRadius="5" ClipToBounds="True">
-                <flux:FluxPlayerView Player="{Binding Player}" />
-            </Border>
-
-            <Grid Grid.Row="2" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="7">
-                <TextBox Text="{Binding Input.Source}"
-                         PlaceholderText="Local file, http(s), rtsp, rtmp or m3u8" />
-                <Button Grid.Column="1" Content="Browse" Command="{Binding BrowseCommand}" />
-                <Button Grid.Column="2" Content="Open + Play" Command="{Binding OpenCommand}" />
-            </Grid>
-
-            <Grid Grid.Row="3" ColumnDefinitions="Auto,Auto,Auto,Auto,*,Auto" ColumnSpacing="7">
-                <Button Content="Play" Command="{Binding PlayCommand}" />
-                <Button Grid.Column="1" Content="Pause" Command="{Binding PauseCommand}" />
-                <Button Grid.Column="2" Content="-10s" Command="{Binding RewindCommand}" IsEnabled="{Binding Player.CanSeek}" />
-                <Button Grid.Column="3" Content="+10s" Command="{Binding ForwardCommand}" IsEnabled="{Binding Player.CanSeek}" />
-                <Slider Grid.Column="4"
+<UserControl
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:flux="clr-namespace:FluxMedia.Avalonia;assembly=FluxMedia.Avalonia"
+    xmlns:playback="clr-namespace:FluxMedia.Playback;assembly=FluxMedia.Playback"
+    xmlns:vm="clr-namespace:FluxMedia.Avalonia.Sample.ViewModels"
+    xmlns:conv="using:Avalonia.Data.Converters"
+    x:Class="FluxMedia.Avalonia.Sample.Views.PlayerItemView"
+    x:DataType="playback:Player"
+    Foreground="#E4ECF8">
+    <UserControl.Styles>
+        <Style Selector="TextBox">
+            <Setter
+                Property="VerticalContentAlignment"
+                Value="Center" />
+            <Setter
+                Property="Background"
+                Value="#0C1420" />
+            <Setter
+                Property="Foreground"
+                Value="#DCE7F6" />
+            <Setter
+                Property="BorderBrush"
+                Value="#2C3A50" />
+            <Setter
+                Property="CornerRadius"
+                Value="6" />
+            <Setter
+                Property="FontSize"
+                Value="13" />
+            <Setter
+                Property="MinHeight"
+                Value="36" />
+        </Style>
+    </UserControl.Styles>
+    <UserControl.Resources>
+        <!-- 压缩示例滑块的刻度留白，完整保留滑块命中区域。 -->
+        <GridLength x:Key="SliderPreContentMargin">
+            0
+        </GridLength>
+        <GridLength x:Key="SliderPostContentMargin">
+            0
+        </GridLength>
+        <x:Double x:Key="SliderHorizontalHeight">
+            20
+        </x:Double>
+        <x:Double x:Key="SliderHorizontalThumbWidth">
+            10
+        </x:Double>
+        <x:Double x:Key="SliderHorizontalThumbHeight">
+            10
+        </x:Double>
+        <CornerRadius x:Key="SliderThumbCornerRadius">
+            5
+        </CornerRadius>
+        <x:Double x:Key="SliderTrackThemeHeight">
+            2
+        </x:Double>
+        <StreamGeometry x:Key="PlayIcon">
+            M 6,3 L 20,12 L 6,21 Z
+        </StreamGeometry>
+        <StreamGeometry x:Key="PauseIcon">
+            M 5,4 H 10 V 20 H 5 Z M 14,4 H 19 V 20 H 14 Z
+        </StreamGeometry>
+        <StreamGeometry x:Key="StopIcon">
+            M 5,5 H 19 V 19 H 5 Z
+        </StreamGeometry>
+        <StreamGeometry x:Key="FullScreenIcon">
+            M 3,9 V 3 H 9 M 15,3 H 21 V 9 M 21,15 V 21 H 15 M 9,21 H 3 V 15
+        </StreamGeometry>
+        <StreamGeometry x:Key="VolumeIcon">
+            M 3,10 H 7 L 12,6 V 18 L 7,14 H 3 Z M 16,8 Q 22,12 16,16
+        </StreamGeometry>
+        <StreamGeometry x:Key="BackwardIcon">
+            M 11,4 L 3,12 L 11,20 M 21,4 L 13,12 L 21,20
+        </StreamGeometry>
+        <StreamGeometry x:Key="ForwardIcon">
+            M 3,4 L 11,12 L 3,20 M 13,4 L 21,12 L 13,20
+        </StreamGeometry>
+        <StreamGeometry x:Key="FolderIcon">
+            M 2,6 H 10 L 12,9 H 22 V 21 H 2 Z M 2,9 H 22
+        </StreamGeometry>
+        <StreamGeometry x:Key="RecordIcon">
+            M 12,3 A 9,9 0 1 1 12,21 A 9,9 0 1 1 12,3 Z
+        </StreamGeometry>
+        <!-- 示例控制栏，样式与文字不进入类库。 -->
+        <DataTemplate
+            x:Key="StandardControlBar"
+            x:DataType="playback:Player">
+            <Border
+                VerticalAlignment="Bottom"
+                Padding="14,12,14,10">
+                <Border.Background>
+                    <LinearGradientBrush
+                        StartPoint="0%,0%"
+                        EndPoint="0%,100%">
+                        <GradientStop
+                            Offset="0"
+                            Color="#00101928" />
+                        <GradientStop
+                            Offset="0.35"
+                            Color="#E60B1019" />
+                        <GradientStop
+                            Offset="1"
+                            Color="#F70B1019" />
+                    </LinearGradientBrush>
+                </Border.Background>
+                <Grid RowDefinitions="20,Auto,Auto,Auto,Auto">
+                    <Slider
                         Minimum="0"
-                        Maximum="{Binding Player.DurationSeconds}"
-                        Value="{Binding Player.PositionSeconds, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                        IsEnabled="{Binding Player.CanSeek}"
-                        VerticalAlignment="Center" />
-                <Button Grid.Column="5" Content="Stop" Command="{Binding StopCommand}" />
-            </Grid>
-
-            <Grid Grid.Row="4" ColumnDefinitions="Auto,130,Auto,Auto,90,*" ColumnSpacing="8">
-                <TextBlock Text="{Binding Player.TimeText}" VerticalAlignment="Center" />
-                <Slider Grid.Column="1"
-                        Minimum="0"
-                        Maximum="1"
-                        Value="{Binding Player.Volume}"
-                        VerticalAlignment="Center" />
-                <CheckBox Grid.Column="2"
-                          Content="Mute"
-                          IsChecked="{Binding Player.IsMuted}"
-                          VerticalAlignment="Center" />
-                <TextBlock Grid.Column="3" Text="倍速" VerticalAlignment="Center" />
-                <ComboBox Grid.Column="4"
-                          ItemsSource="{Binding PlaybackSpeeds}"
-                          SelectedItem="{Binding Player.Speed, Mode=TwoWay}"
-                          IsEnabled="{Binding Player.CanChangeSpeed}" />
-                <TextBlock Grid.Column="5"
-                           Text="{Binding ErrorText}"
-                           Foreground="#B91C1C"
-                           TextTrimming="CharacterEllipsis"
-                           VerticalAlignment="Center" />
-            </Grid>
-
-            <Grid Grid.Row="5" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="7">
-                <TextBox Text="{Binding Input.RecordingPath}"
-                         PlaceholderText="Recording output path (.mp4)" />
-                <Button Grid.Column="1"
-                        Content="Record"
-                        Command="{Binding StartRecordingCommand}" />
-                <Button Grid.Column="2"
-                        Content="Stop Rec"
-                        Command="{Binding StopRecordingCommand}" />
-            </Grid>
-
-            <Border Grid.Row="6"
-                    Padding="9"
-                    CornerRadius="5"
-                    Background="#EEF2F7"
-                    BorderBrush="#D1D5DB"
-                    BorderThickness="1">
-                <StackPanel Spacing="4">
-                    <TextBlock Text="{Binding RecordingText}" Foreground="#7C2D12" />
-                    <TextBlock Text="{Binding DiagnosticText}"
-                               FontFamily="Consolas"
-                               FontSize="11"
-                               TextWrapping="Wrap" />
-                </StackPanel>
+                        Maximum="{Binding DurationSeconds, FallbackValue=1}"
+                        Value="{Binding PositionSeconds, Mode=TwoWay}"
+                        IsEnabled="{Binding CanSeek}"
+                        Height="20"
+                        MinHeight="20"
+                        ToolTip.Tip="播放进度" />
+                    <Grid
+                        Grid.Row="1"
+                        ColumnDefinitions="Auto,*,Auto,Auto,Auto"
+                        Margin="0,6,0,0">
+                        <StackPanel
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Spacing="8">
+                            <Button
+                                Classes="icon"
+                                IsVisible="{Binding !IsPlaying}"
+                                ToolTip.Tip="播放"
+                                AutomationProperties.Name="播放"
+                                Command="{Binding $parent[flux:FluxPlayerControl].PlayPauseCommand}"
+                                Height="36">
+                                <Path
+                                    Data="{StaticResource PlayIcon}"
+                                    Fill="#E4ECF8"
+                                    Width="16"
+                                    Height="16"
+                                    Stretch="Uniform" />
+                            </Button>
+                            <Button
+                                Classes="icon"
+                                IsVisible="{Binding IsPlaying}"
+                                ToolTip.Tip="暂停"
+                                AutomationProperties.Name="暂停"
+                                Command="{Binding $parent[flux:FluxPlayerControl].PlayPauseCommand}"
+                                Height="36">
+                                <Path
+                                    Data="{StaticResource PauseIcon}"
+                                    Fill="#E4ECF8"
+                                    Width="15"
+                                    Height="15"
+                                    Stretch="Uniform" />
+                            </Button>
+                            <Button
+                                Classes="icon"
+                                ToolTip.Tip="停止"
+                                AutomationProperties.Name="停止"
+                                Command="{Binding $parent[flux:FluxPlayerControl].StopCommand}">
+                                <Path
+                                    Data="{StaticResource StopIcon}"
+                                    Fill="#C7D5E8"
+                                    Width="13"
+                                    Height="13"
+                                    Stretch="Uniform" />
+                            </Button>
+                            <Button
+                                Classes="icon"
+                                Command="{Binding $parent[flux:FluxPlayerControl].SeekBackwardCommand}"
+                                ToolTip.Tip="后退十秒"
+                                AutomationProperties.Name="后退十秒">
+                                <Path
+                                    Width="18"
+                                    Height="18"
+                                    Data="{StaticResource BackwardIcon}"
+                                    Stroke="#E4ECF8"
+                                    StrokeThickness="1.8"
+                                    Stretch="Uniform" />
+                            </Button>
+                            <Button
+                                Classes="icon"
+                                Command="{Binding $parent[flux:FluxPlayerControl].SeekForwardCommand}"
+                                ToolTip.Tip="快进十秒"
+                                AutomationProperties.Name="快进十秒">
+                                <Path
+                                    Width="18"
+                                    Height="18"
+                                    Data="{StaticResource ForwardIcon}"
+                                    Stroke="#E4ECF8"
+                                    StrokeThickness="1.8"
+                                    Stretch="Uniform" />
+                            </Button>
+                        </StackPanel>
+                        <TextBlock
+                            Grid.Column="1"
+                            Margin="10,0,4,0"
+                            VerticalAlignment="Center"
+                            FontSize="12"
+                            Foreground="#D1DCEC"
+                            Text="{Binding TimeText}" />
+                        <StackPanel
+                            Grid.Column="2"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Spacing="8"
+                            Margin="0,0,8,0">
+                            <ToggleButton
+                                Classes="icon"
+                                IsChecked="{Binding IsMuted, Mode=TwoWay}"
+                                ToolTip.Tip="静音"
+                                AutomationProperties.Name="静音">
+                                <Path
+                                    Data="{StaticResource VolumeIcon}"
+                                    Stroke="#D1DCEC"
+                                    StrokeThickness="1.8"
+                                    Width="17"
+                                    Height="17"
+                                    Stretch="Uniform" />
+                            </ToggleButton>
+                            <Slider
+                                Width="48"
+                                Minimum="0"
+                                Maximum="1"
+                                Height="20"
+                                VerticalAlignment="Center"
+                                Value="{Binding Volume, Mode=TwoWay}"
+                                ToolTip.Tip="音量" />
+                        </StackPanel>
+                        <ComboBox
+                            Grid.Column="3"
+                            Width="76"
+                            MinHeight="28"
+                            Height="30"
+                            VerticalAlignment="Center"
+                            HorizontalContentAlignment="Center"
+                            VerticalContentAlignment="Center"
+                            FontSize="11"
+                            Padding="7,2"
+                            Margin="0,0,8,0"
+                            ToolTip.Tip="播放倍速"
+                            ItemsSource="{Binding $parent[flux:FluxPlayerControl].PlaybackSpeeds}"
+                            SelectedItem="{Binding Speed, Mode=TwoWay}"
+                            IsEnabled="{Binding CanChangeSpeed}" />
+                        <Button
+                            Grid.Column="4"
+                            Classes="icon"
+                            ToolTip.Tip="全屏"
+                            AutomationProperties.Name="全屏"
+                            Command="{Binding $parent[flux:FluxPlayerControl].FullScreenCommand}">
+                            <Path
+                                Data="{StaticResource FullScreenIcon}"
+                                Stroke="#D1DCEC"
+                                StrokeThickness="1.8"
+                                Width="16"
+                                Height="16"
+                                Stretch="Uniform" />
+                        </Button>
+                    </Grid>
+                    <TextBlock
+                        Grid.Row="2"
+                        Text="{Binding RequestedSpeed, StringFormat='请求 {0:0.###}×，等待应用'}"
+                        FontSize="11"
+                        Foreground="#A8BAD2"
+                        IsVisible="{Binding $parent[flux:FluxPlayerControl].IsSpeedChangePending}" />
+                    <TextBlock
+                        Grid.Row="3"
+                        Text="{Binding LastSpeedError}"
+                        FontSize="11"
+                        Foreground="#FDA4AF"
+                        TextWrapping="Wrap"
+                        IsVisible="{Binding LastSpeedError, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                    <TextBlock
+                        Grid.Row="4"
+                        Foreground="#FDA4AF"
+                        FontSize="11"
+                        TextWrapping="Wrap"
+                        Text="{Binding $parent[flux:FluxPlayerControl].ErrorText}"
+                        IsVisible="{Binding $parent[flux:FluxPlayerControl].ErrorText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                </Grid>
             </Border>
+        </DataTemplate>
+        <DataTemplate
+            x:Key="CompactControlBar"
+            x:DataType="playback:Player">
+            <Border
+                VerticalAlignment="Bottom"
+                Margin="12"
+                Padding="8"
+                CornerRadius="8"
+                Background="#E60F1B2B"
+                BorderBrush="#3B4E69"
+                BorderThickness="1">
+                <Grid ColumnDefinitions="Auto,*,Auto">
+                    <Button
+                        Classes="icon"
+                        IsVisible="{Binding !IsPlaying}"
+                        Command="{Binding $parent[flux:FluxPlayerControl].PlayPauseCommand}"
+                        ToolTip.Tip="播放或暂停"
+                        AutomationProperties.Name="播放或暂停">
+                        <Path
+                            Data="{StaticResource PlayIcon}"
+                            Fill="#E4ECF8"
+                            Width="16"
+                            Height="16"
+                            Stretch="Uniform" />
+                    </Button>
+                    <Button
+                        Classes="icon"
+                        IsVisible="{Binding IsPlaying}"
+                        Command="{Binding $parent[flux:FluxPlayerControl].PlayPauseCommand}"
+                        ToolTip.Tip="播放或暂停"
+                        AutomationProperties.Name="播放或暂停">
+                        <Path
+                            Data="{StaticResource PauseIcon}"
+                            Fill="#E4ECF8"
+                            Width="15"
+                            Height="15"
+                            Stretch="Uniform" />
+                    </Button>
+                    <Slider
+                        Grid.Column="1"
+                        Minimum="0"
+                        Maximum="{Binding DurationSeconds, FallbackValue=1}"
+                        Value="{Binding PositionSeconds, Mode=TwoWay}"
+                        IsEnabled="{Binding CanSeek}"
+                        Height="20"
+                        MinHeight="20"
+                        VerticalAlignment="Center"
+                        Margin="12,0" />
+                    <Button
+                        Grid.Column="2"
+                        Classes="icon"
+                        Command="{Binding $parent[flux:FluxPlayerControl].FullScreenCommand}"
+                        ToolTip.Tip="全屏"
+                        AutomationProperties.Name="全屏">
+                        <Path
+                            Data="{StaticResource FullScreenIcon}"
+                            Stroke="#D1DCEC"
+                            StrokeThickness="1.8"
+                            Width="16"
+                            Height="16"
+                            Stretch="Uniform" />
+                    </Button>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+    <Border
+        x:Name="Card"
+        Margin="7"
+        Padding="0"
+        CornerRadius="10"
+        ClipToBounds="True"
+        Background="#111B2A"
+        BorderBrush="#2A384D"
+        BorderThickness="1">
+        <Grid
+            x:Name="CardLayout"
+            RowDefinitions="Auto,320,Auto">
+            <Grid
+                x:Name="CardHeader"
+                ColumnDefinitions="*,Auto"
+                Margin="14,6,10,6">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="10"
+                    VerticalAlignment="Center">
+                    <TextBlock
+                        Text="播放器"
+                        VerticalAlignment="Center"
+                        FontSize="14"
+                        FontWeight="SemiBold"
+                        Foreground="#E4ECF8" />
+                    <Border
+                        VerticalAlignment="Center"
+                        Padding="7,3"
+                        CornerRadius="4"
+                        Background="#1D2D43">
+                        <StackPanel
+                            Orientation="Horizontal"
+                            Spacing="5">
+                            <Ellipse
+                                Width="5"
+                                Height="5"
+                                VerticalAlignment="Center"
+                                Fill="#5AA2FF"
+                                IsVisible="{Binding IsPlaying}" />
+                            <TextBlock
+                                Text="{Binding State}"
+                                VerticalAlignment="Center"
+                                FontSize="10"
+                                Foreground="#9DB4D0" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+                <Button
+                    x:Name="RemoveButton"
+                    Grid.Column="1"
+                    Classes="icon"
+                    Foreground="#8FA3BE"
+                    ToolTip.Tip="移除播放器"
+                    AutomationProperties.Name="移除播放器">
+                    <Path
+                        Width="10"
+                        Height="10"
+                        Data="M 0,0 L 10,10 M 10,0 L 0,10"
+                        Stroke="#8FA3BE"
+                        StrokeThickness="1.5"
+                        Stretch="Uniform" />
+                </Button>
+            </Grid>
+            <flux:FluxPlayerControl
+                x:Name="PlaybackControl"
+                Grid.Row="1"
+                Player="{Binding}"
+                ControlBarTemplate="{StaticResource StandardControlBar}"
+                Margin="0" />
+            <!-- 输入、录制和诊断仅属于 Sample。 -->
+            <StackPanel
+                x:Name="Editor"
+                Grid.Row="2"
+                Spacing="10"
+                Margin="14,12,14,10"
+                x:DataType="vm:PlayerItemViewModel">
+                <Grid ColumnDefinitions="*,Auto,Auto">
+                    <TextBox
+                        Text="{Binding Input.Source}"
+                        PlaceholderText="输入文件路径或流地址" />
+                    <Button
+                        Grid.Column="1"
+                        Classes="icon"
+                        Command="{Binding BrowseCommand}"
+                        Margin="8,0,0,0"
+                        ToolTip.Tip="浏览媒体文件"
+                        AutomationProperties.Name="浏览媒体文件">
+                        <Path
+                            Width="18"
+                            Height="18"
+                            Data="{StaticResource FolderIcon}"
+                            Stroke="#E4ECF8"
+                            StrokeThickness="1.8"
+                            Stretch="Uniform" />
+                    </Button>
+                    <Button
+                        Grid.Column="2"
+                        Classes="icon"
+                        Command="{Binding OpenCommand}"
+                        Margin="8,0,0,0"
+                        ToolTip.Tip="打开并播放"
+                        AutomationProperties.Name="打开并播放">
+                        <Path
+                            Width="18"
+                            Height="18"
+                            Data="{StaticResource PlayIcon}"
+                            Fill="#E4ECF8"
+                            Stretch="Uniform" />
+                    </Button>
+                </Grid>
+                <TextBlock
+                    Text="{Binding ErrorText}"
+                    FontSize="12"
+                    Foreground="#FDA4AF"
+                    TextWrapping="Wrap"
+                    IsVisible="{Binding ErrorText, Converter={x:Static conv:StringConverters.IsNotNullOrEmpty}}" />
+                <StackPanel Spacing="10">
+                    <TextBlock
+                        Text="录制 / 诊断"
+                        FontSize="12"
+                        Foreground="#8EA4C0" />
+                    <StackPanel Orientation="Horizontal" Spacing="16">
+                        <CheckBox
+                            x:Name="UseCustomControls"
+                            VerticalContentAlignment="Center"
+                            Content="精简控制栏"
+                            FontSize="11"
+                            Foreground="#A8BAD2" />
+                        <CheckBox
+                            x:Name="UseCustomSpeeds"
+                            IsChecked="True"
+                            VerticalContentAlignment="Center"
+                            Content="自定义倍速档位"
+                            ToolTip.Tip="自定义档位支持 0.1～30 倍，取消勾选恢复默认档位"
+                            FontSize="11"
+                            Foreground="#A8BAD2" />
+                    </StackPanel>
+                    <Grid ColumnDefinitions="*,Auto,Auto">
+                        <TextBox
+                            Text="{Binding Input.RecordingPath}"
+                            PlaceholderText="录制输出路径（.mp4）" />
+                        <Button
+                            Grid.Column="1"
+                            Classes="icon"
+                            Command="{Binding StartRecordingCommand}"
+                            Margin="8,0,0,0"
+                            ToolTip.Tip="开始录制"
+                            AutomationProperties.Name="开始录制">
+                            <Path
+                                Width="18"
+                                Height="18"
+                                Data="{StaticResource RecordIcon}"
+                                Fill="#F87171"
+                                Stretch="Uniform" />
+                        </Button>
+                        <Button
+                            Grid.Column="2"
+                            Classes="icon"
+                            Command="{Binding StopRecordingCommand}"
+                            Margin="8,0,0,0"
+                            ToolTip.Tip="停止录制"
+                            AutomationProperties.Name="停止录制">
+                            <Path
+                                Width="18"
+                                Height="18"
+                                Data="{StaticResource StopIcon}"
+                                Fill="#E4ECF8"
+                                Stretch="Uniform" />
+                        </Button>
+                    </Grid>
+                    <Border
+                        Padding="12"
+                        Background="#0C1420"
+                        CornerRadius="6">
+                        <StackPanel Spacing="8">
+                            <TextBlock
+                                Text="{Binding RecordingText}"
+                                Foreground="#7DB4FF"
+                                FontSize="11"
+                                TextWrapping="Wrap" />
+                            <TextBlock
+                                Text="{Binding DiagnosticText}"
+                                Foreground="#8DA4C1"
+                                FontSize="11"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </StackPanel>
         </Grid>
     </Border>
 </UserControl>

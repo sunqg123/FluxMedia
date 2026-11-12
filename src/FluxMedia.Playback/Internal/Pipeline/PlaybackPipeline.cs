@@ -60,6 +60,10 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     /// </summary>
     private readonly List<Task> _tasks = new();
     /// <summary>
+    /// 独立保存解复用任务，避免依赖列表顺序。
+    /// </summary>
+    private Task? _demuxTask;
+    /// <summary>
     /// 唯一的资源释放任务。
     /// </summary>
     private Task? _stopTask;
@@ -69,16 +73,34 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     private int _stopping;
 
     /// <summary>
+    /// 本会话的换速协调器。
+    /// </summary>
+    private readonly PlaybackRateController _rates;
+
+    /// <summary>
+    /// 控制操作触发的管线故障，取消不能覆盖它。
+    /// </summary>
+    private Exception? _controlFailure;
+
+    /// <summary>
+    /// 换速提交校验使用的管线代次。
+    /// </summary>
+    public long RateGeneration { get; }
+
+    /// <summary>
     /// 创建独立管线，打开、重播、跳转重建和重连均使用此入口。
     /// </summary>
-    public PlaybackPipeline(MediaSource source, PlaybackOptions options, Guid instanceId, TimeSpan position, PlaybackVideoFrameHub output, PlaybackPipelineCallbacks callbacks, CancellationToken operationToken)
+    public PlaybackPipeline(MediaSource source, PlaybackOptions options, Guid instanceId, TimeSpan position, PlaybackVideoFrameHub output, PlaybackPipelineCallbacks callbacks, CancellationToken operationToken, PlaybackRateController rates)
     {
         _source = source;
         _options = options;
         _instanceId = instanceId;
         _startPosition = position;
         _callbacks = callbacks;
+        _rates = rates;
+        RateGeneration = rates.BindPipeline(callbacks.Resync().Version);
         _lifetime = CancellationTokenSource.CreateLinkedTokenSource(operationToken);
+        // 视频链路③绑定：帧泵分发后调用会话发布回调。
         _frames = new PlaybackFramePump(output, callbacks.PublishFrame);
         Demuxer = new FFmpegSharedDemuxer(source, options, instanceId, position, deferPacketReading: true);
     }
@@ -93,11 +115,16 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     /// <summary>
     /// 解复用任务是否已退出。
     /// </summary>
-    public bool DemuxerExited => _tasks.Count > 0 && _tasks[0].IsCompleted;
+    public bool DemuxerExited => _demuxTask?.IsCompleted == true;
     /// <summary>
     /// 管线是否已被取消。
     /// </summary>
     public bool IsCanceled => Volatile.Read(ref _stopping) != 0 || _lifetime.IsCancellationRequested;
+
+    /// <summary>
+    /// 控制提交故障不能误当作网络断流自动重连。
+    /// </summary>
+    public bool HasControlFailure => Volatile.Read(ref _controlFailure) is not null;
     /// <summary>
     /// 最新音频时钟，仅属于当前管线。
     /// </summary>
@@ -116,11 +143,13 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     /// </summary>
     public async Task PrepareAsync(CancellationToken cancellationToken)
     {
-        if (_tasks.Count != 0) throw new InvalidOperationException("管线只能打开一次。");
+        if (_demuxTask is not null) throw new InvalidOperationException("管线只能打开一次。");
         var demuxTask = Demuxer.StartAsync(_lifetime.Token);
+        _demuxTask = demuxTask;
         _tasks.Add(demuxTask);
         _ = ObserveDemuxerAsync(demuxTask);
         await Demuxer.WaitUntilReadyAsync(cancellationToken).ConfigureAwait(false);
+        _rates.SetAudioTrack(RateGeneration, Demuxer.AudioStream is not null);
     }
     /// <summary>
     /// 统一创建解码器及帧泵，然后放行读包。
@@ -133,17 +162,44 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
         var token = _lifetime.Token;
         var pumpTask = _frames.RunAsync(token);
         _tasks.Add(pumpTask);
+        var workerContext = new PlaybackWorkerContext(
+            source: _source,
+            instanceId: _instanceId,
+            startPosition: _startPosition,
+            timingMode: Demuxer.TimingMode,
+            isPaused: _callbacks.IsPaused,
+            playbackRate: _callbacks.PlaybackRate,
+            resync: _callbacks.Resync);
+        Func<long> packetGeneration = () => Demuxer.PacketGeneration;
+        FFmpegPacketConsumer packetConsumed = packet => Demuxer.WriteRecordingPacket(packet);
+
         if (Demuxer.AudioStream is not null)
         {
             _audioOutput = AudioOutputDeviceFactory.Create(_instanceId);
-            _audio = new FFmpegPacketAudioPlaybackWorker(_source, _instanceId, _startPosition, Demuxer.AudioStream, Demuxer.AudioPackets, () => Demuxer.PacketGeneration,
-                _audioOutput, _callbacks.IsPaused, _callbacks.PlaybackRate, _callbacks.Volume, _callbacks.IsMuted, UpdateAudioDiagnostics,
-                _callbacks.Resync, packet => Demuxer.WriteRecordingPacket(packet));
+            var audioInput = new FFmpegPacketInput(Demuxer.AudioStream, Demuxer.AudioPackets, packetGeneration);
+            // 音频链路③绑定：诊断回调交给 UpdateAudioDiagnostics。
+            var audioCallbacks = new AudioPlaybackWorkerCallbacks(
+                volume: _callbacks.Volume,
+                isMuted: _callbacks.IsMuted,
+                diagnostics: UpdateAudioDiagnostics,
+                packetConsumed: packetConsumed);
+            _rates.AudioStarting(RateGeneration);
+            _audio = new FFmpegPacketAudioPlaybackWorker(workerContext, audioInput, _audioOutput, audioCallbacks,
+                _rates, RateGeneration, _rates.MaxAudioTempoStages);
         }
-        _video = new FFmpegPacketVideoPlaybackWorker(_source, _options, _instanceId, _startPosition, Demuxer.VideoStream, Demuxer.VideoPackets, () => Demuxer.PacketGeneration,
-            _frames.Queue, _callbacks.IsPaused, _callbacks.PlaybackRate, _callbacks.VideoDiagnostics,
-            () => AudioDiagnostics, () => Demuxer.VideoBufferedDuration, () => Demuxer.VideoPacketCount,
-            _callbacks.Resync, _callbacks.VideoCapabilities, packet => Demuxer.WriteRecordingPacket(packet));
+
+        var videoInput = new FFmpegPacketInput(Demuxer.VideoStream, Demuxer.VideoPackets, packetGeneration);
+        var videoCallbacks = new VideoPlaybackWorkerCallbacks(
+            // 视频链路①绑定：解码输出交给帧泵接收。
+            frameReady: _frames.Queue,
+            diagnostics: _callbacks.VideoDiagnostics,
+            // 播放时钟绑定：视频调度读取当前管线的音频诊断。
+            audioDiagnostics: () => AudioDiagnostics,
+            bufferedDuration: () => Demuxer.VideoBufferedDuration,
+            bufferedPacketCount: () => Demuxer.VideoPacketCount,
+            videoCapabilities: _callbacks.VideoCapabilities,
+            packetConsumed: packetConsumed);
+        _video = new FFmpegPacketVideoPlaybackWorker(workerContext, videoInput, _options, videoCallbacks);
         var videoTask = _video.RunAsync(token);
         var audioTask = _audio?.RunAsync(token) ?? Task.CompletedTask;
         _tasks.Add(videoTask);
@@ -157,7 +213,12 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     private async Task ObserveDemuxerAsync(Task demuxTask)
     {
         try { await demuxTask.ConfigureAwait(false); }
-        catch { _video?.Dispose(); _audio?.Dispose(); }
+        catch
+        {
+            // 保留解复用原始异常，避免先取消帧泵而掩盖断流原因。
+            SignalStop(() => _video?.Dispose());
+            SignalStop(() => _audio?.Dispose());
+        }
     }
     /// <summary>
     /// 先排空解码器及尾帧，再完成整个管线。
@@ -166,23 +227,30 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     {
         try
         {
-            // 任一输出任务失败时立即结束，不能让其它线程继续向失效输出写入。
-            var observed = new List<Task> { videoTask, audioTask, pumpTask };
-            while (!videoTask.IsCompleted)
+            var demuxTask = _demuxTask ?? throw new InvalidOperationException("管线尚未打开。");
+            var pending = new List<Task> { demuxTask, videoTask, audioTask, pumpTask };
+            var framesCompleted = false;
+            while (pending.Count > 0)
             {
-                var first = await Task.WhenAny(observed).ConfigureAwait(false);
-                await first.ConfigureAwait(false);
-                observed.Remove(first);
+                // 排空期间仍观察所有任务，任一失败都立即取消管线。
+                var completed = await Task.WhenAny(pending).ConfigureAwait(false);
+                await completed.ConfigureAwait(false);
+                pending.Remove(completed);
+
+                if (!framesCompleted && demuxTask.IsCompletedSuccessfully && videoTask.IsCompletedSuccessfully)
+                {
+                    _lifetime.Token.ThrowIfCancellationRequested();
+                    _frames.Complete();
+                    framesCompleted = true;
+                }
             }
-            await videoTask.ConfigureAwait(false);
-            await _tasks[0].ConfigureAwait(false);
             _lifetime.Token.ThrowIfCancellationRequested();
-            _frames.Complete();
-            await Task.WhenAll(audioTask, pumpTask).ConfigureAwait(false);
         }
         catch
         {
             Cancel();
+            if (Volatile.Read(ref _controlFailure) is { } failure)
+                throw new InvalidOperationException("管线控制操作失败。", failure);
             throw;
         }
     }
@@ -191,6 +259,7 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     /// </summary>
     private void UpdateAudioDiagnostics(AudioPlaybackDiagnostics diagnostic)
     {
+        // 音频链路④接收：保存时钟供视频同步，并转发会话。
         AudioDiagnostics = diagnostic;
         _callbacks.AudioDiagnostics(diagnostic);
     }
@@ -202,17 +271,37 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     /// 跳转时清除当前设备的旧采样。
     /// </summary>
     public void ClearAudio() => _audioOutput?.Clear();
+
+    /// <summary>
+    /// 看门狗请求安全退出，原生对象仍由工作线程归还。
+    /// </summary>
+    public void Fail(Exception error)
+    {
+        Interlocked.CompareExchange(ref _controlFailure, error, null);
+        Cancel();
+    }
     /// <summary>
     /// 立即中断所有线程，但不提前释放线程正在使用的原生资源。
     /// </summary>
     public void Cancel()
     {
         if (Interlocked.Exchange(ref _stopping, 1) != 0) return;
-        _lifetime.Cancel();
-        Demuxer.Stop();
-        _video?.Dispose();
-        _audio?.Dispose();
-        _frames.Dispose();
+        SignalStop(_lifetime.Cancel);
+        SignalStop(Demuxer.Stop);
+        SignalStop(() => _video?.Dispose());
+        SignalStop(() => _audio?.Dispose());
+        SignalStop(_frames.Dispose);
+    }
+    /// <summary>
+    /// 单个停止动作失败时仍通知其它任务退出。
+    /// </summary>
+    private void SignalStop(Action stop)
+    {
+        try { stop(); }
+        catch (Exception exception)
+        {
+            FluxMediaLog.Write(LogLevel.Error, nameof(PlaybackPipeline), _instanceId, "Event=PipelineStopSignalFailed", exception);
+        }
     }
     /// <summary>
     /// 等待全部线程退出后释放原生对象，多次调用共享结果。
@@ -242,12 +331,21 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
         }
         finally
         {
-            _frames.Dispose();
-            _video?.Dispose();
-            _audio?.Dispose();
-            Demuxer.Dispose();
-            _audioOutput?.Dispose();
-            _lifetime.Dispose();
+            var errors = new List<Exception>();
+            Release(_frames.Dispose);
+            Release(() => _video?.Dispose());
+            Release(() => _audio?.Dispose());
+            Release(Demuxer.Dispose);
+            Release(() => _audioOutput?.Dispose());
+            Release(_lifetime.Dispose);
+            if (errors.Count > 0) throw new AggregateException("播放管线资源释放失败。", errors);
+
+            // 一项释放失败不影响后续资源清理。
+            void Release(Action release)
+            {
+                try { release(); }
+                catch (Exception exception) { errors.Add(exception); }
+            }
         }
     }
 }

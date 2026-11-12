@@ -52,7 +52,9 @@ internal sealed class AudioPlaybackTimeline
     {
         // 只在变速时增加分段，普通音频帧不分配节点。
         if (_segments.Count == 0 || _lastRate != rate)
+        {
             _segments.AddLast((_writtenSeconds, _mediaSeconds, rate));
+        }
         _lastRate = rate;
         _writtenSeconds += seconds;
         _mediaSeconds += seconds * rate;
@@ -67,9 +69,11 @@ internal sealed class AudioPlaybackTimeline
         if (_segments.Count == 0) return null;
         var played = Math.Max(0, _writtenSeconds - pending.TotalSeconds);
         while (_segments.First?.Next is { } next && next.Value.WallStart <= played)
+        {
             _segments.RemoveFirst();
+        }
         var segment = _segments.First!.Value;
         rate = segment.Rate;
-        return TimeSpan.FromSeconds(Math.Max(0, segment.MediaStart + (played - segment.WallStart) * rate));
+        return PlaybackClock.MediaTime(segment.MediaStart + (played - segment.WallStart) * rate);
     }
 }

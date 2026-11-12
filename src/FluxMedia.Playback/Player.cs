@@ -21,7 +21,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// <summary>
     /// 底层播放会话。
     /// </summary>
-    private readonly IPlaybackSession _session;
+    private readonly PlaybackSession _session;
 
     /// <summary>
     /// 串行执行播放器命令的锁。
@@ -59,11 +59,6 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     private double _durationSeconds = 1;
 
     /// <summary>
-    /// 界面绑定的播放速度。
-    /// </summary>
-    private double _speed;
-
-    /// <summary>
     /// 当前音量，范围为 0 到 1。
     /// </summary>
     private double _volume;
@@ -86,18 +81,19 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// <summary>
     /// 绑定一个由引擎创建的独立播放会话。
     /// </summary>
-    internal Player(IPlaybackSession session)
+    internal Player(PlaybackSession session)
     {
         _session = session;
         _notificationContext = SynchronizationContext.Current;
         _positionSeconds = session.CurrentTime.TotalSeconds;
         _durationSeconds = Math.Max(1, session.Duration?.TotalSeconds ?? 1);
-        _speed = session.PlaybackRate;
         _volume = session.Volume;
         _isMuted = session.IsMuted;
         _session.StateChanged += OnSessionStateChanged;
         _session.Faulted += OnSessionFaulted;
         _session.PositionChanged += OnSessionPositionChanged;
+        _session.PlaybackRateChanged += OnSessionPlaybackRateChanged;
+        // 视频链路⑤订阅：接收会话的帧事件。
         _session.VideoFrameReady += OnSessionVideoFrameReady;
 
     }
@@ -205,28 +201,44 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     public bool CanChangeSpeed => !_disposed && _session.CanChangeSpeed;
 
     /// <summary>
-    /// 界面常用倍速，允许设置范围内的自定义值。
+    /// 最新请求的目标倍速，可能尚未应用。
     /// </summary>
-    public static IReadOnlyList<double> SupportedSpeeds => PlaybackRatePolicy.Presets;
+    public double RequestedSpeed => _session.RequestedPlaybackRate;
+
+    /// <summary>
+    /// 是否仍有倍速等待实际应用。
+    /// </summary>
+    public bool IsSpeedChangePending => !_disposed && _session.IsPlaybackRatePending;
+
+    /// <summary>
+    /// 最近换速失败原因，不等同于播放器故障。
+    /// </summary>
+    public string? LastSpeedError => _session.LastPlaybackRateError;
+
+    /// <summary>
+    /// 未自定义界面档位时使用的默认列表，允许范围由 FluxEngineOptions 决定。
+    /// </summary>
+    public static IReadOnlyList<double> DefaultSpeeds { get; } =
+        Array.AsReadOnly(new[] { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0 });
+
+    /// <summary>
+    /// 旧版候选档位入口，请改用 DefaultSpeeds。
+    /// </summary>
+    [Obsolete("Use DefaultSpeeds instead. This list contains presets, not the supported range.")]
+    public static IReadOnlyList<double> SupportedSpeeds => DefaultSpeeds;
 
     /// <summary>
     /// 供界面绑定的播放速度。
     /// </summary>
     public double Speed
     {
-        get => _speed;
+        get => _session.PlaybackRate;
         set
         {
-            if (!CanChangeSpeed)
+            if (Source is null)
             {
                 RaiseProperties(nameof(Speed));
                 return;
-            }
-            if (value == _speed) return;
-            if (PlaybackRatePolicy.IsSupported(value))
-            {
-                _speed = value;
-                RaiseProperties(nameof(Speed));
             }
             _ = SetSpeedFromBindingAsync(value);
         }
@@ -320,7 +332,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// </summary>
     public async ValueTask OpenAsync(string pathOrUrl, PlaybackOptions? options = null, CancellationToken cancellationToken = default)
     {
-        var source = IsNetworkUrl(pathOrUrl) ? MediaSource.FromNetwork(pathOrUrl) : MediaSource.FromFile(pathOrUrl);
+        var source = MediaSourcePolicy.Parse(pathOrUrl);
         await OpenAsync(source, options, cancellationToken).ConfigureAwait(false);
     }
 
@@ -346,7 +358,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// </summary>
     public async ValueTask<PlaybackResult> OpenAndPlayAsync(string pathOrUrl, PlaybackOptions? options = null, CancellationToken cancellationToken = default)
     {
-        var source = IsNetworkUrl(pathOrUrl) ? MediaSource.FromNetwork(pathOrUrl) : MediaSource.FromFile(pathOrUrl);
+        var source = MediaSourcePolicy.Parse(pathOrUrl);
         return await OpenAndPlayAsync(source, options, cancellationToken).ConfigureAwait(false);
     }
 
@@ -413,13 +425,13 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// <summary>
     /// 设置速度并更新界面绑定。
     /// </summary>
-    public ValueTask<PlaybackResult> SetSpeedAsync(double speed, CancellationToken cancellationToken = default) => ExecuteCommandAsync<PlaybackResult>(async token =>
-        {
-            var result = await _session.SetPlaybackRateAsync(speed, token).ConfigureAwait(false);
-            _speed = _session.PlaybackRate;
-            RaiseProperties(nameof(Speed));
-            return result;
-        }, cancellationToken);
+    public async ValueTask<PlaybackResult> SetSpeedAsync(double speed, CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        var result = await _session.SetPlaybackRateAsync(speed, cancellationToken).ConfigureAwait(false);
+        OnSessionPlaybackRateChanged();
+        return result;
+    }
 
     /// <summary>
     /// 设置音量并更新界面绑定。
@@ -565,6 +577,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
                 _session.StateChanged -= OnSessionStateChanged;
                 _session.Faulted -= OnSessionFaulted;
                 _session.PositionChanged -= OnSessionPositionChanged;
+                _session.PlaybackRateChanged -= OnSessionPlaybackRateChanged;
                 _session.VideoFrameReady -= OnSessionVideoFrameReady;
                 await _session.DisposeAsync().ConfigureAwait(false);
             }
@@ -583,18 +596,6 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 判断地址是否属于支持的网络协议。
-    /// </summary>
-    private static bool IsNetworkUrl(string value)
-    {
-        return Uri.TryCreate(value, UriKind.Absolute, out var uri)
-            && (uri.Scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
-                || uri.Scheme.Equals("https", StringComparison.OrdinalIgnoreCase)
-                || uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase)
-                || uri.Scheme.Equals("rtmp", StringComparison.OrdinalIgnoreCase));
-    }
-
-    /// <summary>
     /// 进度绑定直接提交给唯一的跳转调度器。
     /// </summary>
     private void ScheduleBindingSeek(double seconds)
@@ -604,20 +605,24 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     }
 
     /// <summary>
-    /// 应用绑定的速度值，异常时恢复会话值。
+    /// 应用绑定的速度值，记录失败并恢复会话值。
     /// </summary>
     private async Task SetSpeedFromBindingAsync(double speed)
     {
         if (_disposed) return;
         try
         {
-            await SetSpeedAsync(speed).ConfigureAwait(false);
+            var result = await SetSpeedAsync(speed).ConfigureAwait(false);
+            if (!result.IsSuccess)
+                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId,
+                    $"Event=PlaybackRateBindingFailed Rate={speed} Error={result.Error} Message={result.Message}");
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             if (!_disposed)
             {
-                _speed = _session.PlaybackRate;
+                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId,
+                    $"Event=PlaybackRateBindingFailed Rate={speed}", exception);
                 RaiseProperties(nameof(Speed));
             }
         }
@@ -664,13 +669,25 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     }
 
     /// <summary>
+    /// 独立接收换速确认，暂停中不依赖位置通知刷新界面。
+    /// </summary>
+    private void OnSessionPlaybackRateChanged()
+    {
+        if (_disposed) return;
+        DispatchNotification(() =>
+        {
+            if (_disposed) return;
+            RaisePropertiesCore(nameof(Speed), nameof(RequestedSpeed), nameof(IsSpeedChangePending), nameof(LastSpeedError));
+        });
+    }
+
+    /// <summary>
     /// 转发会话状态并更新播放状态属性。
     /// </summary>
     private void OnSessionStateChanged(object? sender, PlaybackState state)
     {
         DispatchNotification(() =>
         {
-            _speed = _session.PlaybackRate;
             NotifySubscribers(StateChanged, state, nameof(StateChanged));
             RaisePropertiesCore(nameof(State), nameof(IsPlaying), nameof(IsSeeking), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive));
         });
@@ -684,6 +701,7 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// <summary>
     /// 将底层视频帧通知转发给显示端。
     /// </summary>
+    // 视频链路⑤转发：触发公开帧事件，交给显示端。
     private void OnSessionVideoFrameReady(object? sender, PlaybackVideoFrameEventArgs args) => NotifySubscribers(VideoFrameReady, args, nameof(VideoFrameReady));
 
     /// <summary>
@@ -775,7 +793,6 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// </summary>
     private void RefreshPositionFromSession()
     {
-        _speed = _session.PlaybackRate;
         _positionSeconds = _session.CurrentTime.TotalSeconds;
         _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
         RaiseProperties(nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
@@ -791,7 +808,6 @@ public sealed class Player : IAsyncDisposable, INotifyPropertyChanged
     /// </summary>
     private void RefreshMediaProperties()
     {
-        _speed = _session.PlaybackRate;
         _positionSeconds = _session.CurrentTime.TotalSeconds;
         _durationSeconds = Math.Max(1, _session.Duration?.TotalSeconds ?? 1);
         RaiseProperties(nameof(Source), nameof(CanSeek), nameof(CanChangeSpeed), nameof(Speed), nameof(IsLive), nameof(IsSeeking), nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));

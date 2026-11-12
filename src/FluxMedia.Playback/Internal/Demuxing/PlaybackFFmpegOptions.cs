@@ -21,29 +21,14 @@ internal static unsafe class PlaybackFFmpegOptions
             return dictionary;
         }
 
-        var network = options.Network;
-        Set(&dictionary, "rw_timeout", ToMicroseconds(EffectiveReadTimeout(options)));
-        Set(&dictionary, "timeout", ToMicroseconds(EffectiveOpenTimeout(options)));
-        Set(&dictionary, "stimeout", ToMicroseconds(EffectiveOpenTimeout(options)));
-        Set(&dictionary, "probesize", Math.Max(4096, network.ProbeSize).ToString(System.Globalization.CultureInfo.InvariantCulture));
-        Set(&dictionary, "analyzeduration", ToMicroseconds(network.AnalyzeDuration));
-        if (Uri.TryCreate(source.Uri, UriKind.Absolute, out var uri))
+        var values = CreateNetworkOptions(source, options);
+        foreach (var option in values)
         {
-            var scheme = uri.Scheme.ToLowerInvariant();
-            if (network.ReconnectEnabled && (scheme is "http" or "https" || uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)))
-            {
-                Set(&dictionary, "reconnect", "1");
-                Set(&dictionary, "reconnect_streamed", "1");
-                Set(&dictionary, "reconnect_on_network_error", "1");
-                Set(&dictionary, "reconnect_delay_max", Math.Max(0, network.ReconnectDelayMax).ToString(System.Globalization.CultureInfo.InvariantCulture));
-            }
-            else if (scheme == "rtsp")
-            {
-                Set(&dictionary, "rtsp_transport", network.RtspTransport == RtspTransportMode.Udp ? "udp" : "tcp");
-            }
+            Set(&dictionary, option.Key, option.Value);
         }
 
-        FluxMediaLog.Write(LogLevel.Information, "PlaybackFFmpegOptions", instanceId, $"Event=NetworkFFmpegOptions Options={Describe(source, options)}");
+        FluxMediaLog.Write(LogLevel.Information, nameof(PlaybackFFmpegOptions), instanceId,
+            $"Event=NetworkFFmpegOptions Options={DescribeNetworkOptions(options, values)}");
         return dictionary;
     }
 
@@ -57,33 +42,47 @@ internal static unsafe class PlaybackFFmpegOptions
             return "local-file-defaults";
         }
 
-        var values = new List<string>
+        return DescribeNetworkOptions(options, CreateNetworkOptions(source, options));
+    }
+
+    /// <summary>
+    /// 按传输协议生成唯一的网络参数集合。
+    /// </summary>
+    private static Dictionary<string, string> CreateNetworkOptions(MediaSource source, PlaybackOptions options)
+    {
+        var network = options.Network;
+        var values = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            $"mode={options.Network.Mode}",
-            $"low_latency={options.Network.LowLatencyMode}",
-            $"rw_timeout={ToMicroseconds(EffectiveReadTimeout(options))}",
-            $"timeout={ToMicroseconds(EffectiveOpenTimeout(options))}",
-            $"stimeout={ToMicroseconds(EffectiveOpenTimeout(options))}",
-            $"probesize={Math.Max(4096,options.Network.ProbeSize)}",
-            $"analyzeduration={ToMicroseconds(options.Network.AnalyzeDuration)}"
+            ["rw_timeout"] = ToMicroseconds(EffectiveReadTimeout(options)),
+            ["timeout"] = ToMicroseconds(EffectiveOpenTimeout(options)),
+            ["stimeout"] = ToMicroseconds(EffectiveOpenTimeout(options)),
+            ["probesize"] = Math.Max(4096, network.ProbeSize).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            ["analyzeduration"] = ToMicroseconds(network.AnalyzeDuration)
         };
 
-        if (Uri.TryCreate(source.Uri, UriKind.Absolute, out var uri))
+        var protocol = MediaSourcePolicy.GetProtocol(source);
+        if (protocol == "rtsp")
         {
-            if (uri.Scheme.Equals("rtsp", StringComparison.OrdinalIgnoreCase))
-            {
-                values.Add($"rtsp_transport={(options.Network.RtspTransport == RtspTransportMode.Udp ? "udp" : "tcp")}");
-            }
-            else if (options.Network.ReconnectEnabled && (uri.Scheme is "http" or "https" || uri.AbsolutePath.EndsWith(".m3u8", StringComparison.OrdinalIgnoreCase)))
-            {
-                values.Add("reconnect=1");
-                values.Add("reconnect_streamed=1");
-                values.Add("reconnect_on_network_error=1");
-                values.Add($"reconnect_delay_max={Math.Max(0, options.Network.ReconnectDelayMax)}");
-            }
+            values["rtsp_transport"] = network.RtspTransport == RtspTransportMode.Udp ? "udp" : "tcp";
+        }
+        else if (network.ReconnectEnabled && (protocol is "http" or "https"))
+        {
+            values["reconnect"] = "1";
+            values["reconnect_streamed"] = "1";
+            values["reconnect_on_network_error"] = "1";
+            values["reconnect_delay_max"] = Math.Max(0, network.ReconnectDelayMax).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        return string.Join(", ", values);
+        return values;
+    }
+
+    /// <summary>
+    /// 直接描述实际采用的参数，避免诊断规则漂移。
+    /// </summary>
+    private static string DescribeNetworkOptions(PlaybackOptions options, IReadOnlyDictionary<string, string> values)
+    {
+        var parameters = values.Select(option => $"{option.Key}={option.Value}");
+        return $"mode={options.Network.Mode}, low_latency={options.Network.LowLatencyMode}, {string.Join(", ", parameters)}";
     }
 
     /// <summary>

@@ -213,6 +213,41 @@ public sealed record PlaybackDiagnosticInfo
     public double PlaybackRate { get; init; } = 1.0;
 
     /// <summary>
+    /// 最近请求的目标倍速。
+    /// </summary>
+    public double RequestedRate { get; init; } = 1.0;
+
+    /// <summary>
+    /// 当前处理链已提交的实际倍速。
+    /// </summary>
+    public double AppliedRate { get; init; } = 1.0;
+
+    /// <summary>
+    /// 当前配置允许的最低倍速。
+    /// </summary>
+    public double MinRate { get; init; }
+
+    /// <summary>
+    /// 当前配置允许的最高倍速。
+    /// </summary>
+    public double MaxRate { get; init; }
+
+    /// <summary>
+    /// 最近换速请求编号。
+    /// </summary>
+    public long RateRequestId { get; init; }
+
+    /// <summary>
+    /// 最近换速请求的结果，不代表当前播放是否正常。
+    /// </summary>
+    public string RateChangeState { get; init; } = "Applied";
+
+    /// <summary>
+    /// 最近换速失败原因。
+    /// </summary>
+    public string? LastRateError { get; init; }
+
+    /// <summary>
     /// 音量。
     /// </summary>
     public double Volume { get; init; } = 1.0;

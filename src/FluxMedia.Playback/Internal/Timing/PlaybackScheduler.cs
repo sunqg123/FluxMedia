@@ -16,11 +16,6 @@ internal sealed class PlaybackScheduler
     private static readonly TimeSpan VideoSyncTolerance = TimeSpan.FromMilliseconds(2);
 
     /// <summary>
-    /// 最大音频同步等待。
-    /// </summary>
-    private static readonly TimeSpan MaxAudioSyncWait = TimeSpan.FromMilliseconds(250);
-
-    /// <summary>
     /// 最大重新缓冲等待。
     /// </summary>
     private static readonly TimeSpan MaxRebufferWait = TimeSpan.FromMilliseconds(500);
@@ -139,7 +134,7 @@ internal sealed class PlaybackScheduler
     /// <summary>
     /// 根据缓冲和音频时钟决定当前帧的处理方式。
     /// </summary>
-    public VideoFrameSchedulingDecision ScheduleVideoFrame(TimeSpan timestamp, TimeSpan fallbackFrameInterval, CancellationToken cancellationToken)
+    public VideoFrameSchedulingDecision ScheduleVideoFrame(TimeSpan timestamp, CancellationToken cancellationToken)
     {
         var bufferedDuration = _videoBufferedDuration();
         if (_presentNextFrameImmediately)
@@ -155,11 +150,7 @@ internal sealed class PlaybackScheduler
                 return new VideoFrameSchedulingDecision(VideoFrameSchedulingAction.Drop, TimeSpan.Zero, null, null, bufferedDuration, true);
             }
         }
-        else if (!_hasPresentedVideo &&
-            _videoBufferedPacketCount() > 0 &&
-            bufferedDuration > TimeSpan.Zero &&
-            bufferedDuration < _minBufferDuration &&
-            !HasRebufferTimedOut())
+        else if (!_hasPresentedVideo && _videoBufferedPacketCount() > 0 && bufferedDuration > TimeSpan.Zero && bufferedDuration < _minBufferDuration && !HasRebufferTimedOut())
         {
             _bufferingStartedAt ??= DateTimeOffset.UtcNow;
             Wait(RebufferPollInterval, cancellationToken);
@@ -170,6 +161,7 @@ internal sealed class PlaybackScheduler
             _bufferingStartedAt = null;
         }
 
+        // 播放时钟：优先参考设备估算的音频呈现位置。
         var audioClock = GetAudioClock();
         if (audioClock is not null)
         {
@@ -182,43 +174,43 @@ internal sealed class PlaybackScheduler
 
             if (distance > VideoSyncTolerance)
             {
-                var wait = TimeSpan.FromTicks((long)(distance.Ticks / _audioRate));
-                Wait(wait > MaxAudioSyncWait ? MaxAudioSyncWait : wait, cancellationToken);
-                _hasPresentedVideo = true;
-                return new VideoFrameSchedulingDecision(VideoFrameSchedulingAction.Present, distance, distance, audioClock.Value, bufferedDuration, false);
+                var wait = TimeSpan.FromSeconds(Math.Min(distance.TotalSeconds / _audioRate, RebufferPollInterval.TotalSeconds));
+                Wait(wait, cancellationToken);
+                return new VideoFrameSchedulingDecision(VideoFrameSchedulingAction.Wait, wait, distance, audioClock.Value, bufferedDuration, false);
             }
 
             _hasPresentedVideo = true;
             return new VideoFrameSchedulingDecision(VideoFrameSchedulingAction.Present, TimeSpan.Zero, distance, audioClock.Value, bufferedDuration, false);
         }
 
-        var delay = CalculatePresentationDelay(timestamp, fallbackFrameInterval);
-        Wait(delay, cancellationToken);
+        // 播放时钟：音频时钟不可用时，按时间戳和倍速计算等待。
+        var delay = CalculatePresentationDelay(timestamp);
+        if (delay > TimeSpan.Zero)
+        {
+            var wait = delay > RebufferPollInterval ? RebufferPollInterval : delay;
+            Wait(wait, cancellationToken);
+            return new VideoFrameSchedulingDecision(VideoFrameSchedulingAction.Wait, wait, null, null, bufferedDuration, false);
+        }
         _hasPresentedVideo = true;
         return new VideoFrameSchedulingDecision(VideoFrameSchedulingAction.Present, delay, null, null, bufferedDuration, false);
     }
 
     /// <summary>
-    /// 等待当前视频帧到达应显示的时间。
-    /// </summary>
-    public void WaitForVideoFrame(TimeSpan timestamp, TimeSpan fallbackFrameInterval, CancellationToken cancellationToken) => ScheduleVideoFrame(timestamp, fallbackFrameInterval, cancellationToken);
-
-    /// <summary>
     /// 根据媒体时间和播放速度计算显示等待。
     /// </summary>
-    private TimeSpan CalculatePresentationDelay(TimeSpan timestamp, TimeSpan fallbackFrameInterval)
+    private TimeSpan CalculatePresentationDelay(TimeSpan timestamp)
     {
         var now = DateTimeOffset.UtcNow;
         var rate = PlaybackRatePolicy.Normalize(_playbackRate());
         if (rate != _clockRate && _firstMediaTimestamp is not null && _presentationStartedAt is not null)
         {
             // 从当前媒体位置重新锚定，避免变速后突然跳帧。
-            _firstMediaTimestamp += TimeSpan.FromTicks((long)((now - _presentationStartedAt.Value).Ticks * _clockRate));
+            _firstMediaTimestamp = PlaybackClock.MediaTime(_firstMediaTimestamp.Value.TotalSeconds
+                + (now - _presentationStartedAt.Value).TotalSeconds * _clockRate);
             _presentationStartedAt = now;
         }
         _clockRate = rate;
-        return PlaybackPacer.CalculateDelay(
-            timestamp, fallbackFrameInterval, TimingMode, ref _firstMediaTimestamp, ref _presentationStartedAt, now, rate);
+        return PlaybackPacer.CalculateDelay(timestamp, TimingMode, ref _firstMediaTimestamp, ref _presentationStartedAt, now, rate);
     }
 
     /// <summary>
@@ -235,14 +227,16 @@ internal sealed class PlaybackScheduler
         _audioRate = PlaybackRatePolicy.Normalize(audio.PlaybackRate);
         var buffered = audio.OutputBufferedDuration ?? TimeSpan.Zero;
         var deviceDelay = audio.OutputDeviceDelay ?? TimeSpan.Zero;
-        var elapsed = audio.UpdatedAt == default ? TimeSpan.Zero : DateTimeOffset.UtcNow - audio.UpdatedAt;
-        if (elapsed < TimeSpan.Zero || elapsed > TimeSpan.FromSeconds(2))
+        if (audio.UpdatedAt == default) return null;
+        var elapsed = DateTimeOffset.UtcNow - audio.UpdatedAt;
+        if (elapsed < TimeSpan.Zero)
         {
             elapsed = TimeSpan.Zero;
         }
+        // 快照中的音频已经播完时改用媒体时钟，不能永远等待旧位置。
+        if (elapsed >= buffered + deviceDelay) return null;
 
-        var clock = audio.PresentationTime.Value + TimeSpan.FromTicks((long)(Math.Min(elapsed.TotalSeconds, (buffered + deviceDelay).TotalSeconds) * TimeSpan.TicksPerSecond * _audioRate));
-        return clock < TimeSpan.Zero ? TimeSpan.Zero : clock;
+        return PlaybackClock.MediaTime(audio.PresentationTime.Value.TotalSeconds + elapsed.TotalSeconds * _audioRate);
     }
 
     /// <summary>
@@ -268,11 +262,7 @@ internal sealed class PlaybackScheduler
     /// </summary>
     private void Wait(TimeSpan delay, CancellationToken cancellationToken)
     {
-        if (delay <= TimeSpan.Zero)
-        {
-            return;
-        }
-
+        if (delay <= TimeSpan.Zero) return;
         var dueAt = DateTimeOffset.UtcNow + delay;
         while (delay > TimeSpan.Zero && !_shouldStop() && !cancellationToken.IsCancellationRequested)
         {

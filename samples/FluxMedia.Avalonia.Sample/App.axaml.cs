@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using FluxMedia.Avalonia.Sample.Views;
 using FluxMedia.Playback;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace FluxMedia.Avalonia.Sample;
@@ -31,9 +32,21 @@ public sealed partial class App : Application
             FluxEngine.Start(new FluxEngineOptions
             {
                 FFmpegPath = ffmpegRoot,
-                EnableLogging = true
+                EnableLogging = true,
+                MaxPlaybackRate = 20.0,
             });
-            desktop.Exit += (_, _) => FluxEngine.Shutdown();
+            desktop.Exit += (_, _) =>
+            {
+                try
+                {
+                    FluxEngine.Shutdown();
+                }
+                catch (Exception exception)
+                {
+                    // 引擎日志可能已经关闭，保留独立的退出错误记录。
+                    Trace.TraceError("Event=EngineShutdownFailed Exception={0}", exception);
+                }
+            };
             desktop.MainWindow = new MainWindow();
         }
 

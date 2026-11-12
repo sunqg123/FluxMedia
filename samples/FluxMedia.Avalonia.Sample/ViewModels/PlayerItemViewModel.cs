@@ -8,173 +8,89 @@ using System.Windows.Input;
 namespace FluxMedia.Avalonia.Sample.ViewModels;
 
 /// <summary>
-/// 提供播放器列表项的状态和操作命令。
+/// 管理示例面板的媒体输入、录制和诊断。
 /// </summary>
-public sealed class PlayerItemViewModel : NotifyObject, IAsyncDisposable
+public sealed class PlayerItemViewModel : NotifyObject, IDisposable
 {
     /// <summary>
-    /// 选择媒体文件的回调。
+    /// 媒体文件选择回调。
     /// </summary>
     private readonly Func<Task<string?>> _browse;
 
     /// <summary>
-    /// 移除当前播放器的回调。
-    /// </summary>
-    private readonly Func<PlayerItemViewModel, Task> _remove;
-
-    /// <summary>
-    /// 定期刷新播放诊断信息的界面定时器。
+    /// 诊断信息刷新计时器。
     /// </summary>
     private readonly DispatcherTimer _diagnosticTimer;
 
     /// <summary>
-    /// 状态文本。
+    /// 播放诊断文本。
     /// </summary>
-    private string _stateText = "Created";
+    private string _diagnosticText = "等待打开媒体。";
 
     /// <summary>
-    /// 诊断文本。
+    /// 录制状态文本。
     /// </summary>
-    private string _diagnosticText = "Waiting for source.";
+    private string _recordingText = "尚未录制";
 
     /// <summary>
-    /// 错误文本。
+    /// 输入或录制操作的错误。
     /// </summary>
     private string _errorText = string.Empty;
 
     /// <summary>
-    /// 录制文本。
-    /// </summary>
-    private string _recordingText = "Not recording";
-
-    /// <summary>
-    /// 是否允许移除。
-    /// </summary>
-    private bool _canRemove = true;
-
-    /// <summary>
-    /// 是否已释放资源。
+    /// 面板是否已释放。
     /// </summary>
     private bool _disposed;
 
     /// <summary>
-    /// 初始化播放器条目视图模型所需的状态和资源。
+    /// 关联外部播放器并初始化示例面板。
     /// </summary>
-    public PlayerItemViewModel(int id, Func<Task<string?>> browse, Func<PlayerItemViewModel, Task> remove)
+    public PlayerItemViewModel(Player player, Func<Task<string?>> browse)
     {
-        Title = $"Player {id}";
+        Player = player;
         _browse = browse;
-        _remove = remove;
-        Player = FluxEngine.CreatePlayer();
-        Player.StateChanged += OnStateChanged;
-        Player.Faulted += OnFaulted;
-
         BrowseCommand = new AsyncRelayCommand(BrowseAsync);
         OpenCommand = new AsyncRelayCommand(OpenAsync);
-        PlayCommand = new AsyncRelayCommand(() => RunAsync(() => Player.PlayAsync().AsTask()));
-        PauseCommand = new AsyncRelayCommand(() => RunAsync(() => Player.PauseAsync().AsTask()));
-        StopCommand = new AsyncRelayCommand(StopAsync);
-        RewindCommand = new AsyncRelayCommand(() => RunAsync(() => Player.SeekByAsync(TimeSpan.FromSeconds(-10)).AsTask()));
-        ForwardCommand = new AsyncRelayCommand(() => RunAsync(() => Player.SeekByAsync(TimeSpan.FromSeconds(10)).AsTask()));
         StartRecordingCommand = new AsyncRelayCommand(StartRecordingAsync);
         StopRecordingCommand = new AsyncRelayCommand(() => RunAsync(() => Player.StopRecordingAsync().AsTask()));
-        RemoveCommand = new AsyncRelayCommand(() => _remove(this));
-
         _diagnosticTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _diagnosticTimer.Tick += (_, _) => UpdateDiagnostics();
+        _diagnosticTimer.Tick += OnDiagnosticTick;
         _diagnosticTimer.Start();
+        UpdateDiagnostics();
     }
 
     /// <summary>
-    /// 标题。
-    /// </summary>
-    public string Title { get; }
-
-    /// <summary>
-    /// 关联的播放器实例。
+    /// 页面提供的播放器，由页面负责释放。
     /// </summary>
     public Player Player { get; }
 
     /// <summary>
-    /// 当前播放器的媒体与录制输入。
+    /// 媒体地址和录制路径。
     /// </summary>
     public PlayerInput Input { get; } = new();
 
     /// <summary>
-    /// 核心提供的常用倍速档位。
-    /// </summary>
-    public IReadOnlyList<double> PlaybackSpeeds => FluxMedia.Playback.Player.SupportedSpeeds;
-
-    /// <summary>
-    /// 浏览命令。
+    /// 选择本地媒体。
     /// </summary>
     public ICommand BrowseCommand { get; }
 
     /// <summary>
-    /// 打开命令。
+    /// 打开输入地址并播放。
     /// </summary>
     public ICommand OpenCommand { get; }
 
     /// <summary>
-    /// 播放命令。
-    /// </summary>
-    public ICommand PlayCommand { get; }
-
-    /// <summary>
-    /// 暂停命令。
-    /// </summary>
-    public ICommand PauseCommand { get; }
-
-    /// <summary>
-    /// 停止命令。
-    /// </summary>
-    public ICommand StopCommand { get; }
-
-    /// <summary>
-    /// 后退命令。
-    /// </summary>
-    public ICommand RewindCommand { get; }
-
-    /// <summary>
-    /// 向前命令。
-    /// </summary>
-    public ICommand ForwardCommand { get; }
-
-    /// <summary>
-    /// 开始录制命令。
+    /// 开始录制。
     /// </summary>
     public ICommand StartRecordingCommand { get; }
 
     /// <summary>
-    /// 停止录制命令。
+    /// 停止录制。
     /// </summary>
     public ICommand StopRecordingCommand { get; }
 
     /// <summary>
-    /// 移除命令。
-    /// </summary>
-    public ICommand RemoveCommand { get; }
-
-    /// <summary>
-    /// 状态文本。
-    /// </summary>
-    public string StateText
-    {
-        get => _stateText;
-        private set => SetField(ref _stateText, value);
-    }
-
-    /// <summary>
-    /// 录制文本。
-    /// </summary>
-    public string RecordingText
-    {
-        get => _recordingText;
-        private set => SetField(ref _recordingText, value);
-    }
-
-    /// <summary>
-    /// 诊断文本。
+    /// 播放诊断文本。
     /// </summary>
     public string DiagnosticText
     {
@@ -183,7 +99,16 @@ public sealed class PlayerItemViewModel : NotifyObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// 错误文本。
+    /// 录制状态文本。
+    /// </summary>
+    public string RecordingText
+    {
+        get => _recordingText;
+        private set => SetField(ref _recordingText, value);
+    }
+
+    /// <summary>
+    /// 示例面板的操作错误。
     /// </summary>
     public string ErrorText
     {
@@ -192,153 +117,122 @@ public sealed class PlayerItemViewModel : NotifyObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// 是否允许移除。
+    /// 停止诊断刷新，保留外部播放器。
     /// </summary>
-    public bool CanRemove
-    {
-        get => _canRemove;
-        set => SetField(ref _canRemove, value);
-    }
-
-    /// <summary>
-    /// 释放当前对象持有的资源。
-    /// </summary>
-    public async ValueTask DisposeAsync()
+    public void Dispose()
     {
         if (_disposed)
         {
             return;
         }
-
         _disposed = true;
         _diagnosticTimer.Stop();
-        Player.StateChanged -= OnStateChanged;
-        Player.Faulted -= OnFaulted;
-        await Player.DisposeAsync();
+        _diagnosticTimer.Tick -= OnDiagnosticTick;
     }
 
     /// <summary>
-    /// 选择需要打开的本地媒体文件。
+    /// 选择媒体文件并填入地址。
     /// </summary>
     private async Task BrowseAsync()
     {
-        var path = await _browse();
-        if (!string.IsNullOrWhiteSpace(path))
+        await RunAsync(async () =>
         {
-            Input.Source = path;
-        }
+            var path = await _browse();
+            if (!_disposed && !string.IsNullOrWhiteSpace(path))
+            {
+                Input.Source = path;
+            }
+            return PlaybackResult.Success();
+        });
     }
 
     /// <summary>
-    /// 打开媒体源并读取媒体信息。
+    /// 打开输入的媒体地址并播放。
     /// </summary>
-    private async Task OpenAsync()
+    private Task OpenAsync()
     {
         var source = Input.Source.Trim();
         if (string.IsNullOrWhiteSpace(source))
         {
-            ErrorText = "Enter a file or URL.";
-            return;
+            ErrorText = "请输入文件路径或网络地址。";
+            return Task.CompletedTask;
         }
-
-        ErrorText = string.Empty;
-        try
-        {
-            var result = await Player.OpenAndPlayAsync(source);
-            if (!result.IsSuccess)
-            {
-                ErrorText = result.Message ?? "Open failed.";
-            }
-        }
-        catch (Exception ex)
-        {
-            ErrorText = ex.Message;
-        }
-
-        UpdateDiagnostics();
+        return RunAsync(() => Player.OpenAndPlayAsync(source).AsTask());
     }
 
     /// <summary>
-    /// 取消待执行操作并停止播放管线。
+    /// 开始录制，缺省路径时保存到桌面。
     /// </summary>
-    private async Task StopAsync()
+    private Task StartRecordingAsync()
     {
-        try
+        var path = Input.RecordingPath.Trim();
+        if (string.IsNullOrWhiteSpace(path))
         {
-            await Player.StopAsync();
-            UpdateDiagnostics();
+            path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                $"FluxMedia-{Player.InstanceId:N}-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
+            Input.RecordingPath = path;
         }
-        catch (Exception ex)
-        {
-            ErrorText = ex.Message;
-        }
+        return RunAsync(() => Player.StartRecordingAsync(path).AsTask());
     }
 
     /// <summary>
-    /// 开始录制当前播放的数据包。
-    /// </summary>
-    private async Task StartRecordingAsync()
-    {
-        var outputPath = Input.RecordingPath.Trim();
-        if (string.IsNullOrWhiteSpace(outputPath))
-        {
-            outputPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), $"FluxMedia-{Title.Replace(" ", "-")}-{DateTime.Now:yyyyMMdd-HHmmss}.mp4");
-            Input.RecordingPath = outputPath;
-        }
-
-        await RunAsync(() => Player.StartRecordingAsync(outputPath).AsTask());
-        UpdateDiagnostics();
-    }
-
-    /// <summary>
-    /// 执行界面操作，统一处理失败结果并刷新状态。
+    /// 执行面板操作并显示失败原因。
     /// </summary>
     private async Task RunAsync(Func<Task<PlaybackResult>> operation)
     {
-        if (_disposed) return;
+        if (_disposed || Player.IsDisposed)
+        {
+            return;
+        }
+        ErrorText = string.Empty;
         try
         {
             var result = await operation();
-            if (!result.IsSuccess)
+            if (!_disposed && !result.IsSuccess)
             {
                 ErrorText = result.Message ?? result.Error.ToString();
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            ErrorText = ex.Message;
+            if (!_disposed)
+            {
+                ErrorText = exception.Message;
+            }
+        }
+        if (!_disposed)
+        {
+            UpdateDiagnostics();
         }
     }
 
     /// <summary>
-    /// 播放状态变化时刷新界面状态。
+    /// 响应诊断刷新计时。
     /// </summary>
-    private void OnStateChanged(object? sender, PlaybackState state) => Dispatcher.UIThread.Post(() => StateText = state.ToString());
+    private void OnDiagnosticTick(object? sender, EventArgs e) => UpdateDiagnostics();
 
     /// <summary>
-    /// 收到播放错误时更新错误文本。
-    /// </summary>
-    private void OnFaulted(object? sender, FluxMedia.Core.Errors.FluxMediaError error) => Dispatcher.UIThread.Post(() => ErrorText = error.Message);
-
-    /// <summary>
-    /// 读取并显示最新播放诊断信息。
+    /// 刷新播放和录制诊断文本。
     /// </summary>
     private void UpdateDiagnostics()
     {
-        if (_disposed)
+        if (_disposed || Player.IsDisposed)
         {
             return;
         }
-
-        var d = Player.GetDiagnosticInfo();
+        var diagnostic = Player.GetDiagnosticInfo();
         var recording = Player.GetRecordingDiagnosticInfo();
-        RecordingText = $"{recording.State} · packets {recording.EncodedFrameCount}/{recording.ReceivedFrameCount}" + (string.IsNullOrWhiteSpace(recording.LastError) ? string.Empty : $" · {recording.LastError}");
-        DiagnosticText =
-            $"Decoder: {d.VideoDecoderBackend}\n" +
-            $"Present: {d.VideoPresentationBackend}\n" +
-            $"Hardware: requested={d.HardwareAccelerationRequested}, active={d.HardwareAccelerationActive}\n" +
-            $"Fallback: {d.HardwareAccelerationFailureReason ?? "-"}\n" +
-            $"Frames: ready={d.VideoFrameReadyCount}, decoded={d.DecodedFrameCount}, dropped={d.DroppedFrameCount}\n" +
-            $"Worker: running={d.WorkerRunning}, exit={d.WorkerExitReason ?? "-"}";
+        RecordingText = $"{recording.State} · 包 {recording.EncodedFrameCount}/{recording.ReceivedFrameCount}"
+            + (string.IsNullOrWhiteSpace(recording.LastError) ? string.Empty : $" · {recording.LastError}");
+        DiagnosticText = $"解码：{diagnostic.VideoDecoderBackend}\n"
+            + $"显示：{diagnostic.VideoPresentationBackend}\n"
+            + $"硬解：请求={diagnostic.HardwareAccelerationRequested}，启用={diagnostic.HardwareAccelerationActive}\n"
+            + $"降级：{diagnostic.HardwareAccelerationFailureReason ?? "-"}\n"
+            + $"帧：输出={diagnostic.VideoFrameReadyCount}，解码={diagnostic.DecodedFrameCount}，丢弃={diagnostic.DroppedFrameCount}\n"
+            + $"当前倍速：{diagnostic.AppliedRate:0.###}，{(Player.IsSpeedChangePending ? "等待应用" : "无待应用请求")}\n"
+            + $"允许倍速：{diagnostic.MinRate}～{diagnostic.MaxRate}\n"
+            + $"最近换速请求：编号={diagnostic.RateRequestId}，目标={diagnostic.RequestedRate:0.###}，结果={diagnostic.RateChangeState}\n"
+            + $"最近换速错误：{diagnostic.LastRateError ?? "-"}\n"
+            + $"工作状态：{diagnostic.WorkerRunning}，退出={diagnostic.WorkerExitReason ?? "-"}";
     }
 }

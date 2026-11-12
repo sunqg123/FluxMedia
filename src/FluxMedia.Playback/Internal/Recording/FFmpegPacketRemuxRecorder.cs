@@ -108,11 +108,6 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
     private long _maxOutputEndUs;
 
     /// <summary>
-    /// 已成功封装的数据包载荷总字节数。
-    /// </summary>
-    private long _writtenPayloadBytes;
-
-    /// <summary>
     /// 已接收数据包数量。
     /// </summary>
     private long _receivedPacketCount;
@@ -173,6 +168,7 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
         {
             State = PlaybackRecordingState.Idle,
             OutputPath = options.OutputPath,
+            VideoCodec = videoStream is null ? string.Empty : ffmpeg.avcodec_get_name(videoStream.CodecParameters->codec_id),
             IncludesAudio = audioStream is not null
         };
     }
@@ -184,9 +180,10 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
     {
         get
         {
+            PlaybackRecordingDiagnosticInfo diagnostic;
             lock (_syncRoot)
             {
-                var diagnostic = _diagnostic with
+                diagnostic = _diagnostic with
                 {
                     ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
                     EncodedFrameCount = Interlocked.Read(ref _writtenPacketCount),
@@ -195,8 +192,8 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
                         ? _diagnostic.RecordedDuration
                         : DateTimeOffset.UtcNow - _diagnostic.StartedAt.Value
                 };
-                return RefreshFileInfo(diagnostic);
             }
+            return RefreshFileInfo(diagnostic);
         }
     }
 
@@ -209,8 +206,20 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
         {
             ThrowIfDisposed();
             if (_started) return;
-            PrepareOutputPath();
-            OpenOutput();
+            try
+            {
+                PrepareOutputPath();
+                OpenOutput();
+            }
+            catch (Exception exception)
+            {
+                try { CloseOutput(); }
+                catch (Exception cleanup)
+                {
+                    throw new AggregateException("录制打开失败，关闭输出时也发生错误。", exception, cleanup);
+                }
+                throw;
+            }
             _started = true;
             _acceptingWrites = true;
             _diagnostic = _diagnostic with
@@ -329,15 +338,8 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
             NormalizeOutputTimestamps(packet, outputStream->index);
             packet->stream_index = outputStream->index;
             packet->pos = -1;
-            var packetSize = Math.Max(0, packet->size);
-            if (_options.SimulatedWriteQuotaBytes is long quota && _writtenPayloadBytes + packetSize > quota)
-            {
-                throw new IOException($"Recording storage quota exceeded after {_writtenPayloadBytes} bytes.");
-            }
-
             var write = ffmpeg.av_interleaved_write_frame(_formatContext, packet);
             FFmpegErrorHelper.ThrowIfError(write, "av_interleaved_write_frame");
-            _writtenPayloadBytes += packetSize;
             UpdateOutputEnd(packet, outputStream->time_base);
             _consecutiveWriteFailures = 0;
             Interlocked.Increment(ref _writtenPacketCount);
@@ -465,6 +467,7 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
     /// </summary>
     public ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Task? writerTask;
         lock (_syncRoot)
         {
@@ -476,11 +479,10 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
         if (writerTask is null || writerTask.IsCompleted)
         {
             writerTask?.GetAwaiter().GetResult();
-            cancellationToken.ThrowIfCancellationRequested();
             FinishAfterDrain();
             return default;
         }
-        return new ValueTask(FFmpegPacketRemuxRecorderAwaiter.AwaitAndRunAsync(writerTask, cancellationToken, FinishAfterDrain));
+        return new ValueTask(FFmpegPacketRemuxRecorderAwaiter.AwaitAndRunAsync(writerTask, FinishAfterDrain));
     }
 
     /// <summary>
@@ -504,26 +506,64 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
     /// </summary>
     public ValueTask DisposeAsync()
     {
-        var stop = StopAsync();
+        ValueTask stop;
+        try { stop = StopAsync(); }
+        catch
+        {
+            ReleaseResources();
+            throw;
+        }
         if (!stop.IsCompletedSuccessfully)
         {
-            return new ValueTask(FFmpegPacketRemuxRecorderAwaiter.AwaitAndRunAsync(stop.AsTask(), CancellationToken.None, MarkDisposed));
+            return new ValueTask(FFmpegPacketRemuxRecorderAwaiter.AwaitAndFinallyAsync(stop.AsTask(), ReleaseResources));
         }
 
-        stop.GetAwaiter().GetResult();
-        MarkDisposed();
+        ReleaseResources();
         return default;
     }
 
     /// <summary>
-    /// 标记录制器已释放。
+    /// 写入任务退出后关闭文件，即使任务失败也不遗留原生资源。
     /// </summary>
-    private void MarkDisposed()
+    private void ReleaseResources()
     {
-        lock (_syncRoot)
+        lock (_writeGate)
         {
-            if (_disposed) return;
-            _disposed = true;
+            lock (_syncRoot) { if (_disposed) return; }
+            try { CloseOutput(); }
+            catch (Exception exception)
+            {
+                lock (_syncRoot)
+                {
+                    _diagnostic = _diagnostic with
+                    {
+                        State = PlaybackRecordingState.Failed,
+                        StoppedAt = DateTimeOffset.UtcNow,
+                        OutputFileFinalized = false,
+                        LastError = exception.Message
+                    };
+                }
+                throw;
+            }
+            finally
+            {
+                lock (_syncRoot)
+                {
+                    _disposed = true;
+                    _acceptingWrites = false;
+                    _started = false;
+                    if (_diagnostic.State == PlaybackRecordingState.Recording)
+                    {
+                        _diagnostic = _diagnostic with
+                        {
+                            State = PlaybackRecordingState.Failed,
+                            StoppedAt = DateTimeOffset.UtcNow,
+                            OutputFileFinalized = false,
+                            LastError = _diagnostic.LastError ?? "录制写入任务异常退出，文件未完成封装。"
+                        };
+                    }
+                }
+            }
         }
     }
 
@@ -632,7 +672,7 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
         }
         FluxMediaLog.Write(
             LogLevel.Error, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingAborted OutputPath={_options.OutputPath} ConsecutiveFailures={_consecutiveWriteFailures} Error={exception.Message}", exception);
-        CloseOutput(writeTrailer: false);
+        CloseOutput();
     }
 
     /// <summary>
@@ -640,75 +680,75 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
     /// </summary>
     private void Finish()
     {
+        Exception? failure = null;
+        var trailerWritten = false;
+        var outputClosed = false;
         try
         {
             FFmpegErrorHelper.ThrowIfError(ffmpeg.av_write_trailer(_formatContext), "av_write_trailer");
-            if (Interlocked.Read(ref _writtenPacketCount) == 0)
-            {
-                throw new InvalidOperationException("Recording did not receive a decodable video keyframe; no media packets were written.");
-            }
+            trailerWritten = true;
+        }
+        catch (Exception exception) { failure = exception; }
 
-            lock (_syncRoot)
+        try
+        {
+            CloseOutput();
+            outputClosed = true;
+        }
+        catch (Exception exception)
+        {
+            failure = failure is null ? exception : new AggregateException("录制封装和关闭均失败。", failure, exception);
+        }
+
+        var writtenPackets = Interlocked.Read(ref _writtenPacketCount);
+        if (failure is null && writtenPackets == 0)
+            failure = new InvalidOperationException("未写入有效媒体数据包，录制文件不可播放。");
+
+        lock (_syncRoot)
+        {
+            _started = false;
+            _acceptingWrites = false;
+            _diagnostic = _diagnostic with
             {
-                _diagnostic = RefreshFileInfo(_diagnostic with
-                {
-                    State = PlaybackRecordingState.Completed,
-                    StoppedAt = DateTimeOffset.UtcNow,
-                    RecordedDuration = _diagnostic.StartedAt is null ? _diagnostic.RecordedDuration : DateTimeOffset.UtcNow - _diagnostic.StartedAt.Value,
-                    OutputFileFinalized = true,
-                    ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
-                    EncodedFrameCount = Interlocked.Read(ref _writtenPacketCount),
-                    DroppedFrameCount = Interlocked.Read(ref _droppedPacketCount)
-                });
-            }
-            var diagnostic = Diagnostic;
+                State = failure is null ? PlaybackRecordingState.Completed : PlaybackRecordingState.Failed,
+                StoppedAt = DateTimeOffset.UtcNow,
+                RecordedDuration = _diagnostic.StartedAt is null ? _diagnostic.RecordedDuration : DateTimeOffset.UtcNow - _diagnostic.StartedAt.Value,
+                OutputFileFinalized = trailerWritten && outputClosed,
+                LastError = failure?.Message,
+                ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
+                EncodedFrameCount = writtenPackets,
+                DroppedFrameCount = Interlocked.Read(ref _droppedPacketCount)
+            };
+        }
+
+        // 文件信息和日志不参与判断封装是否成功。
+        var diagnostic = Diagnostic;
+        lock (_syncRoot) _diagnostic = _diagnostic with { OutputFileExists = diagnostic.OutputFileExists, OutputFileSize = diagnostic.OutputFileSize };
+        if (failure is null)
             FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingStop OutputPath={_options.OutputPath} Packets={diagnostic.EncodedFrameCount} Dropped={diagnostic.DroppedFrameCount} OutputFileSize={diagnostic.OutputFileSize}");
-        }
-        catch (Exception ex)
-        {
-            lock (_syncRoot)
-            {
-                _diagnostic = RefreshFileInfo(_diagnostic with
-                {
-                    State = PlaybackRecordingState.Failed,
-                    StoppedAt = DateTimeOffset.UtcNow,
-                    RecordedDuration = _diagnostic.StartedAt is null ? _diagnostic.RecordedDuration : DateTimeOffset.UtcNow - _diagnostic.StartedAt.Value,
-                    LastError = ex.Message,
-                    OutputFileFinalized = false,
-                    ReceivedFrameCount = Interlocked.Read(ref _receivedPacketCount),
-                    EncodedFrameCount = Interlocked.Read(ref _writtenPacketCount),
-                    DroppedFrameCount = Interlocked.Read(ref _droppedPacketCount)
-                });
-            }
-            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingFailed OutputPath={_options.OutputPath} Error={ex.Message}", ex);
-        }
-        finally
-        {
-            CloseOutput(writeTrailer: false);
-            lock (_syncRoot)
-            {
-                _started = false;
-                _acceptingWrites = false;
-            }
-        }
+        else
+            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketRemuxRecorder), _instanceId, $"Event=PacketRemuxRecordingFailed OutputPath={_options.OutputPath} Error={failure.Message}", failure);
     }
 
     /// <summary>
     /// 关闭输出文件及封装上下文。
     /// </summary>
-    private void CloseOutput(bool writeTrailer)
+    private void CloseOutput()
     {
-        if (_formatContext == null) return;
-        if (writeTrailer)
-        {
-            ffmpeg.av_write_trailer(_formatContext);
-        }
-        if (_formatContext->pb != null)
-        {
-            ffmpeg.avio_closep(&_formatContext->pb);
-        }
-        ffmpeg.avformat_free_context(_formatContext);
+        var context = _formatContext;
+        if (context == null) return;
         _formatContext = null;
+        var closeResult = 0;
+        try
+        {
+            if (context->pb != null) closeResult = ffmpeg.avio_closep(&context->pb);
+        }
+        finally
+        {
+            // IO 关闭失败也必须归还格式上下文。
+            ffmpeg.avformat_free_context(context);
+        }
+        FFmpegErrorHelper.ThrowIfError(closeResult, "avio_closep");
     }
 
     /// <summary>
@@ -757,22 +797,23 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
     /// <summary>
     /// 更新输出文件是否存在及大小。
     /// </summary>
-    private static PlaybackRecordingDiagnosticInfo RefreshFileInfo(PlaybackRecordingDiagnosticInfo diagnostic)
+    private PlaybackRecordingDiagnosticInfo RefreshFileInfo(PlaybackRecordingDiagnosticInfo diagnostic)
     {
-        if (string.IsNullOrWhiteSpace(diagnostic.OutputPath) || !File.Exists(diagnostic.OutputPath))
+        try
         {
+            var file = string.IsNullOrWhiteSpace(diagnostic.OutputPath) ? null : new FileInfo(diagnostic.OutputPath);
+            var exists = file?.Exists == true;
             return diagnostic with
             {
-                OutputFileExists = false,
-                OutputFileSize = 0
+                OutputFileExists = exists,
+                OutputFileSize = exists ? file!.Length : 0
             };
         }
-
-        return diagnostic with
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
-            OutputFileExists = true,
-            OutputFileSize = new FileInfo(diagnostic.OutputPath).Length
-        };
+            FluxMediaLog.Write(LogLevel.Warning, nameof(FFmpegPacketRemuxRecorder), _instanceId, "Event=RecordingFileInfoUnavailable", exception);
+            return diagnostic;
+        }
     }
 
     /// <summary>

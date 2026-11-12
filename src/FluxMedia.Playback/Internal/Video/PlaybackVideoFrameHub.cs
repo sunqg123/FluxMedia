@@ -69,6 +69,7 @@ internal sealed class PlaybackVideoFrameHub
                 if (!_output.Writer.TryWrite(lease)) lease.Dispose();
             }
         }
+        // 视频链路③触发：回到会话 PublishVideoFrameAsync。
         if (frame.IsCurrent) await publish(frame, count).ConfigureAwait(false);
         else RecordDrop();
     }

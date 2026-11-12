@@ -261,6 +261,7 @@ public sealed class FluxPlayerView : UserControl
     private void SubscribeToPlayer()
     {
         if (_isDetached || _isSubscribed || _attachedPlayer is null) return;
+        // 视频链路⑥订阅：Player 帧事件交给 OnVideoFrameReady。
         _attachedPlayer.VideoFrameReady += OnVideoFrameReady;
         _isSubscribed = true;
     }
@@ -281,6 +282,7 @@ public sealed class FluxPlayerView : UserControl
     private void OnVideoFrameReady(object? sender, PlaybackVideoFrameEventArgs args)
     {
         if (_isDetached || !args.Frame.IsCurrent) return;
+        // 视频链路⑥接收：保留租约，供 UI 线程稍后显示。
         var lease = args.Frame.Retain();
         Interlocked.Increment(ref _receivedFrameCount);
         lock (_frameSync)
@@ -294,6 +296,7 @@ public sealed class FluxPlayerView : UserControl
             if (Interlocked.Exchange(ref _renderQueued, 1) == 1) return;
         }
 
+        // 视频链路⑦调度：切到 UI 线程处理最新帧。
         Dispatcher.UIThread.Post(RenderLatestFrame, DispatcherPriority.Render);
     }
 
@@ -319,6 +322,7 @@ public sealed class FluxPlayerView : UserControl
         try
         {
             if (!lease.Frame.IsCurrent) { Interlocked.Exchange(ref _renderQueued, 0); return; }
+            // 视频链路⑧显示：按帧类型进入 GPU 或 CPU 显示路径。
             if (lease.Frame.GpuSurface is not null && _gpuPresenter is not null)
             {
                 _ = PresentGpuFrameAsync(lease);
@@ -468,6 +472,7 @@ public sealed class FluxPlayerView : UserControl
             if (_isDetached || _latestFrame is null || Interlocked.Exchange(ref _renderQueued, 1) == 1) return;
         }
 
+        // 视频链路⑦调度：切到 UI 线程处理最新帧。
         Dispatcher.UIThread.Post(RenderLatestFrame, DispatcherPriority.Render);
     }
 

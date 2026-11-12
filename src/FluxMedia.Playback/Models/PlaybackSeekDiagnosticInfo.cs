@@ -16,7 +16,7 @@ public sealed record PlaybackSeekDiagnosticInfo
     public TimeSpan? RequestedPosition { get; init; }
 
     /// <summary>
-    /// 实际位置。
+    /// 跳转后首个有效输出帧的位置；无输出帧时为空。
     /// </summary>
     public TimeSpan? ActualPosition { get; init; }
 

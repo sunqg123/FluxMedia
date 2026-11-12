@@ -1,31 +1,21 @@
 using FluxMedia.Avalonia.Sample.Commands;
 using FluxMedia.Avalonia.Sample.Infrastructure;
+using FluxMedia.Playback;
 using System.Collections.ObjectModel;
 using System.Windows.Input;
 
 namespace FluxMedia.Avalonia.Sample.ViewModels;
 
 /// <summary>
-/// 管理示例窗口中的播放器和界面命令。
+/// 管理播放器集合及其创建、释放。
 /// </summary>
 public sealed class MainWindowViewModel : NotifyObject, IAsyncDisposable
 {
     /// <summary>
-    /// 打开本地文件选择窗口的回调。
+    /// 订阅集合变化并创建两个播放器。
     /// </summary>
-    private readonly Func<Task<string?>> _browse;
-
-    /// <summary>
-    /// 分配给下一个播放器的递增标识。
-    /// </summary>
-    private int _nextPlayerId = 1;
-
-    /// <summary>
-    /// 初始化主入口窗口视图模型所需的状态和资源。
-    /// </summary>
-    public MainWindowViewModel(Func<Task<string?>> browse)
+    public MainWindowViewModel()
     {
-        _browse = browse;
         Players.CollectionChanged += (_, _) => OnPropertyChanged(nameof(PlayerCountText));
         AddPlayerCommand = new RelayCommand(AddPlayer);
         AddPlayer();
@@ -33,61 +23,59 @@ public sealed class MainWindowViewModel : NotifyObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// 当前窗口管理的播放器集合。
+    /// 页面绑定的播放器集合。
     /// </summary>
-    public ObservableCollection<PlayerItemViewModel> Players { get; } = new();
+    public ObservableCollection<Player> Players { get; } = new();
 
     /// <summary>
-    /// 添加播放器命令。
+    /// 添加尚未打开媒体的播放器。
     /// </summary>
     public ICommand AddPlayerCommand { get; }
 
     /// <summary>
-    /// 播放器数量文本。
+    /// 当前播放器数量。
     /// </summary>
-    public string PlayerCountText => $"{Players.Count} player(s)";
+    public string PlayerCountText => $"{Players.Count} 个播放器";
 
     /// <summary>
-    /// 释放当前对象持有的资源。
+    /// 创建播放器并加入集合。
+    /// </summary>
+    private void AddPlayer() => Players.Add(FluxEngine.CreatePlayer());
+
+    /// <summary>
+    /// 从集合移除播放器并释放资源。
+    /// </summary>
+    public async Task RemovePlayerAsync(Player player)
+    {
+        if (!Players.Remove(player))
+        {
+            return;
+        }
+        await player.DisposeAsync();
+    }
+
+    /// <summary>
+    /// 释放全部播放器并汇总清理异常。
     /// </summary>
     public async ValueTask DisposeAsync()
     {
-        foreach (var player in Players.ToArray())
-        {
-            await player.DisposeAsync();
-        }
-
+        var players = Players.ToArray();
         Players.Clear();
-    }
-
-    /// <summary>
-    /// 添加一个播放器列表项。
-    /// </summary>
-    private void AddPlayer()
-    {
-        var item = new PlayerItemViewModel(_nextPlayerId++, _browse, RemoveAsync);
-        Players.Add(item);
-        UpdateRemoveState();
-    }
-
-    /// <summary>
-    /// 释放并移除指定播放器。
-    /// </summary>
-    private async Task RemoveAsync(PlayerItemViewModel item)
-    {
-        if (!Players.Remove(item)) return;
-        await item.DisposeAsync();
-        UpdateRemoveState();
-    }
-
-    /// <summary>
-    /// 根据播放器数量更新移除操作的可用性。
-    /// </summary>
-    private void UpdateRemoveState()
-    {
-        foreach (var player in Players)
+        var errors = new List<Exception>();
+        foreach (var player in players)
         {
-            player.CanRemove = Players.Count > 1;
+            try
+            {
+                await player.DisposeAsync();
+            }
+            catch (Exception exception)
+            {
+                errors.Add(exception);
+            }
+        }
+        if (errors.Count > 0)
+        {
+            throw new AggregateException("示例播放器释放失败。", errors);
         }
     }
 }

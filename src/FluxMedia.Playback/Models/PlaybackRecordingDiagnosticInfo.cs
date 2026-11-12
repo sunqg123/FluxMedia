@@ -46,24 +46,24 @@ public sealed record PlaybackRecordingDiagnosticInfo
     public long DroppedFrameCount { get; init; }
 
     /// <summary>
-    /// 输出文件大小。
+    /// 最近读取的文件大小；查询失败时保留已有值。
     /// </summary>
     public long OutputFileSize { get; init; }
 
     /// <summary>
-    /// 是否输出文件存在。
+    /// 最近读取的文件存在状态。
     /// </summary>
     public bool OutputFileExists { get; init; }
 
     /// <summary>
-    /// 输出文件是否已完成封装。
+    /// 文件尾和 IO 关闭均成功；不代表文件含有效媒体数据。
     /// </summary>
     public bool OutputFileFinalized { get; init; }
 
     /// <summary>
-    /// 视频编解码器。
+    /// 源视频编码名称，未知时为空字符串。
     /// </summary>
-    public string VideoCodec { get; init; } = "mpeg4";
+    public string VideoCodec { get; init; } = string.Empty;
 
     /// <summary>
     /// 是否包含音频。
@@ -71,7 +71,7 @@ public sealed record PlaybackRecordingDiagnosticInfo
     public bool IncludesAudio { get; init; }
 
     /// <summary>
-    /// 最近错误。
+    /// 最近错误；成功完成后清空。
     /// </summary>
     public string? LastError { get; init; }
 }

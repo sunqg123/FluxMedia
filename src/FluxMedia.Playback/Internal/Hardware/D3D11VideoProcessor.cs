@@ -68,11 +68,6 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     private readonly int _height;
 
     /// <summary>
-    /// 表面数量。
-    /// </summary>
-    private int _surfaceCount;
-
-    /// <summary>
     /// 是否已释放资源。
     /// </summary>
     private bool _disposed;
@@ -187,7 +182,6 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
         if (_disposed || _available.Count >= SurfacePoolLimit)
         {
             surface.Dispose();
-            Interlocked.Decrement(ref _surfaceCount);
             return;
         }
 
@@ -204,7 +198,6 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
             return surface;
         }
 
-        Interlocked.Increment(ref _surfaceCount);
         return new D3D11SharedSurface(_device, _videoDevice, _enumerator, _width, _height);
     }
 }

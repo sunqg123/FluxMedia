@@ -20,5 +20,10 @@ internal sealed class DelegateLogSink : IFluxMediaLogSink
     /// <summary>
     /// 将日志交给宿主回调。
     /// </summary>
-    public void Write(LogLevel level, string module, Guid instanceId, string message, Exception? exception) => _writer(level, module, instanceId, message, exception);
+    public void Write(
+        LogLevel level,
+        string module,
+        Guid instanceId,
+        string message,
+        Exception? exception) => _writer(level, module, instanceId, message, exception);
 }

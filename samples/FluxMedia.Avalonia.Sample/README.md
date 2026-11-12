@@ -1,27 +1,47 @@
 # 项目引用示例
 
-通过 ProjectReference 使用当前两个库，演示宿主配置和多播放器 UI。
+通过 ProjectReference 使用当前两个库，演示 `ObservableCollection<Player>`、基础操作控件和自定义 UI。
 
 ## 目录结构
 
 | 目录 | 职责 |
 | --- | --- |
-| `Models` | `PlayerInput` 保存媒体地址和录制路径等输入数据 |
-| `Views` | 主窗口、独立播放器卡片，以及文件选择等界面操作 |
-| `ViewModels` | 管理播放器集合、播放命令和界面状态 |
-| `Commands` | 同步和异步命令实现 |
+| `Models` | `PlayerInput` 保存 Demo 的媒体与录制路径 |
+| `Views` | 文件选择、卡片布局、自定义控制栏与宿主全屏 |
+| `ViewModels` | 主模型直接拥有 Player 集合，条目模型仅管理 Demo 辅助面板 |
+| `Commands` | Demo 的输入、录制等命令 |
 | `Infrastructure` | 属性变更通知基类 |
 
-`App` 负责引擎初始化。`MainWindow` 将文件选择回调传给视图模型，视图模型不持有窗口。
-`PlayerItemView` 继承列表项的数据上下文，输入绑定到 `Input`，播放属性绑定到核心 `Player`。
+`App` 负责引擎初始化，`MainWindowViewModel.Players` 的类型为 `ObservableCollection<Player>`。
+`ItemsControl` 的模板数据就是 Player，`FluxPlayerControl.Player` 直接绑定集合项。
+`PlayerItemViewModel` 只服务于文件选择、录制和诊断，不再创建播放器，也不处理基础播放命令。
+实际应用只需绑定控件，无须使用这个 Demo 辅助模型。
 
-## 播放控制
+## 播放界面
 
-进度条使用 PositionSeconds 双向即时绑定，CanSeek 控制交互，核心仍独立拦截直播 Seek。
-倍速选择绑定 Speed 与 CanChangeSpeed，提供 0.5、0.75、1、1.25、1.5、2 倍速；直播禁用。
+Sample 在自己的 StandardControlBar 模板中定义播放按钮、进度和音量等操作，绑定类库命令。
+操作区浮现在视频底部，鼠标移动、画面点击或触摸可显示；播放中闲置后自动隐藏。
+拖动、悬停操作栏、键盘操作、展开菜单或发生错误时保留显示。
+键盘空闲后恢复自动隐藏，控制栏中的焦点不会永久阻止隐藏。
+进度与倍速沿用核心权限，直播禁止 Seek 和倍速。
 
-日志在运行输出目录的 Logs。Sample 的 ResolveFFmpegRoot 先检查 FLUXMEDIA_FFMPEG_ROOT，再从程序目录向父目录查找 `FFmpeg/<RID>/native`，通过 FFmpegPath 传入核心。
-原生库不复制到 bin 或发布目录。核心只检查显式路径和环境变量，目录向上查找由 Sample 负责。
-克隆仓库后执行 `git lfs pull`，获取 Windows x64 原生库和根目录的 Sample.mp4，也可自行选择媒体文件。
+勾选“精简控制栏”可在两个示例模板之间切换，录制与诊断区域保持常显。
+“自定义倍速档位”演示设置 0.1、0.25、0.6、1、1.3、1.8、2.5、4、8、10、12、16、20、25、30 倍，取消勾选后恢复播放器默认档位。
+倍速列表由 Sample 设置到 `FluxPlayerControl.PlaybackSpeeds`，不修改核心默认值；音视频共同响应目标倍速。
+核心默认范围为 0.1～10，自动推算四级音频滤镜；Sample 在 App.axaml.cs 调用 FluxEngine.Start 时将 FluxEngineOptions.MaxPlaybackRate 配置为 30，自动得到五级，无需另填预算。启动时统一校验，诊断显示当前上下限，Sample 不重复校验范围。
+倍速选择显示已应用值，待应用标识显示在控制栏；诊断同时显示目标、实际值、请求编号、状态和错误。
+暂停时选择速度属于 Accepted，恢复后才提交；暂停中 Seek 会作废未提交目标并刷新选择器。
+按钮文字、布局及错误提示均由 Sample 定义；两个类库没有多语言处理或语言资源键。
+全屏按钮通知 MainWindow，宿主将同一个播放器控件铺满窗口；再次点击或按 Escape 恢复列表。
+不会为全屏另建第二个绑定同一 Player 的显示控件。
 
-应用启动入口先调用 FluxEngine.Start，初始化失败直接抛出异常；播放器创建过程不再隐式启动引擎。
+集合所有者负责移除和释放 Player。卡片卸载只停止自己的诊断计时器，不停止播放器。
+详细用法见 [Avalonia 控件](../../docs/avalonia-controls.md)。
+
+## 原生依赖
+
+Sample 的 ResolveFFmpegRoot 先检查 FLUXMEDIA_FFMPEG_ROOT，再从程序目录向父目录查找
+`FFmpeg/<RID>/native`，通过 FFmpegPath 传入核心，不向输出目录复制原生库。
+克隆仓库后执行 `git lfs pull`，获取 Windows x64 原生库和 Sample.mp4。
+
+应用先调用 FluxEngine.Start，成功后才创建播放器；退出时释放播放器并关闭引擎。

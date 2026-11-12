@@ -33,13 +33,22 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
     /// <summary>
     /// 当前实际使用的倍速。
     /// </summary>
-    private double _rate;
+    private readonly double _rate;
+
+    /// <summary>
+    /// 本滤镜链使用的媒体倍速。
+    /// </summary>
+    public double Rate => _rate;
 
     /// <summary>
     /// 建立解码帧到变速 PCM 的滤镜链。
     /// </summary>
-    public FFmpegAudioTempo(AVCodecContext* codec, int sampleRate, int channels, double rate)
+    public FFmpegAudioTempo(AVCodecContext* codec, int sampleRate, int channels, double rate, int stageBudget, double[]? stages = null)
     {
+        if (stages is null && !AudioTempoPlan.TryPlan(rate, stageBudget, out stages))
+        {
+            throw new NotSupportedException("倍速数值无效或超过当前音频滤镜级数预算。");
+        }
         _channels = channels;
         _rate = rate;
         try
@@ -70,11 +79,18 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
             }
             var format = ffmpeg.av_get_sample_fmt_name(codec->sample_fmt);
             _source = Create("abuffer", "input", $"time_base=1/{sampleRate}:sample_rate={sampleRate}:sample_fmt={format}:channel_layout={layoutName}");
-            var tempo = Create("atempo", "tempo", rate.ToString(CultureInfo.InvariantCulture));
+            var previous = _source;
+            var stage = 0;
+            // 使用预检得到的同一份计划，1 倍时直接连接格式转换。
+            foreach (var stageRate in stages!)
+            {
+                var tempo = Create("atempo", $"tempo{stage++}", stageRate.ToString("R", CultureInfo.InvariantCulture));
+                FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_link(previous, 0, tempo, 0), "audio tempo link");
+                previous = tempo;
+            }
             var pcm = Create("aformat", "pcm", $"sample_fmts=s16:sample_rates={sampleRate}:channel_layouts={(channels == 1 ? "mono" : "stereo")}");
             _sink = Create("abuffersink", "output", null);
-            FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_link(_source, 0, tempo, 0), "audio input link");
-            FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_link(tempo, 0, pcm, 0), "audio tempo link");
+            FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_link(previous, 0, pcm, 0), "audio pcm link");
             FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_link(pcm, 0, _sink, 0), "audio output link");
             FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_graph_config(_graph, null), "audio filter config");
         }
@@ -94,15 +110,10 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
     }
 
     /// <summary>
-    /// 变更倍速后提交一帧，不改变设备采样率。
+    /// 按本链倍速处理音频帧，不改变设备采样率。
     /// </summary>
-    public void Push(AVFrame* frame, double rate, TempoPcmConsumer consume)
+    public void Push(AVFrame* frame, TempoPcmConsumer consume)
     {
-        if (_rate != rate)
-        {
-            FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_graph_send_command(_graph, "tempo", "tempo", rate.ToString(CultureInfo.InvariantCulture), null, 0, 0), "audio tempo command");
-            _rate = rate;
-        }
         FFmpegErrorHelper.ThrowIfError(ffmpeg.av_buffersrc_add_frame_flags(_source, frame, (int)AvBuffersrcFlag.AV_BUFFERSRC_FLAG_KEEP_REF), "audio filter input");
         Drain(consume);
     }
@@ -128,6 +139,7 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
             FFmpegErrorHelper.ThrowIfError(result, "audio filter output");
             try
             {
+                // 音频链路①触发：PCM 回到音频 Worker 的 consume。
                 consume(new ReadOnlySpan<byte>(_output->data[0], checked(_output->nb_samples * _channels * sizeof(short))), _output->nb_samples, _rate);
             }
             finally

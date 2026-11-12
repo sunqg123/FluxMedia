@@ -1,43 +1,77 @@
-<Window xmlns="https://github.com/avaloniaui"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:views="clr-namespace:FluxMedia.Avalonia.Sample.Views"
-        xmlns:vm="clr-namespace:FluxMedia.Avalonia.Sample.ViewModels"
-        x:Class="FluxMedia.Avalonia.Sample.Views.MainWindow"
-        x:DataType="vm:MainWindowViewModel"
-        Width="1280"
-        Height="820"
-        MinWidth="900"
-        MinHeight="600"
-        Title="FluxMedia Multi Player">
-    <Grid RowDefinitions="Auto,*" Background="#111827">
-        <Border Padding="16,12" Background="#1F2937">
-            <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="10">
+<Window
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:views="clr-namespace:FluxMedia.Avalonia.Sample.Views"
+    xmlns:vm="clr-namespace:FluxMedia.Avalonia.Sample.ViewModels"
+    xmlns:playback="clr-namespace:FluxMedia.Playback;assembly=FluxMedia.Playback"
+    x:Class="FluxMedia.Avalonia.Sample.Views.MainWindow"
+    x:DataType="vm:MainWindowViewModel"
+    Width="1280"
+    Height="820"
+    MinWidth="900"
+    MinHeight="600"
+    Title="FluxMedia Multi Player">
+    <Grid
+        RowDefinitions="Auto,*"
+        Background="#0B111B">
+        <Border
+            x:Name="Header"
+            Padding="24,12"
+            Background="#101A28">
+            <Grid ColumnDefinitions="*,Auto,Auto">
                 <StackPanel>
-                    <TextBlock Text="FluxMedia Multi Player" FontSize="20" FontWeight="SemiBold" Foreground="White" />
-                    <TextBlock Text="MVVM · independent players · D3D11VA / VAAPI diagnostics"
-                               Foreground="#9CA3AF" />
+                    <TextBlock
+                        Text="FluxMedia"
+                        FontSize="22"
+                        FontWeight="SemiBold"
+                        Foreground="White" />
+                    <TextBlock
+                        Text="播放工作台  /  独立播放器 · 自定义界面"
+                        Foreground="#9CA3AF" />
                 </StackPanel>
-                <TextBlock Grid.Column="1"
-                           VerticalAlignment="Center"
-                           Foreground="#D1D5DB"
-                           Text="{Binding PlayerCountText}" />
-                <Button Grid.Column="2"
-                        Padding="16,8"
-                        Content="+ Add player"
-                        Command="{Binding AddPlayerCommand}" />
+                <TextBlock
+                    Grid.Column="1"
+                    VerticalAlignment="Center"
+                    Foreground="#D1D5DB"
+                    Text="{Binding PlayerCountText}"
+                    Margin="10,0,0,0" />
+                <Button
+                    Grid.Column="2"
+                    Classes="icon"
+                    ToolTip.Tip="添加播放器"
+                    AutomationProperties.Name="添加播放器"
+                    Command="{Binding AddPlayerCommand}"
+                    Margin="12,0,0,0">
+                    <Path
+                        Width="18"
+                        Height="18"
+                        Data="M 9,0 V 18 M 0,9 H 18"
+                        Stroke="#E4ECF8"
+                        StrokeThickness="1.8"
+                        Stretch="Uniform" />
+                </Button>
             </Grid>
         </Border>
-
-        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
-            <ItemsControl ItemsSource="{Binding Players}" Margin="14">
+        <ScrollViewer
+            x:Name="PlayerScroll"
+            Grid.Row="1"
+            HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl
+                x:Name="PlayerList"
+                ItemsSource="{Binding Players}"
+                VerticalAlignment="Top"
+                Margin="14">
                 <ItemsControl.ItemsPanel>
                     <ItemsPanelTemplate>
-                        <WrapPanel Orientation="Horizontal" />
+                        <UniformGrid Columns="2" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:PlayerItemViewModel">
-                        <views:PlayerItemView />
+                    <DataTemplate x:DataType="playback:Player">
+                        <views:PlayerItemView
+                            VerticalAlignment="Top"
+                            RemoveRequested="OnRemoveRequested"
+                            FullScreenRequested="OnFullScreenRequested" />
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

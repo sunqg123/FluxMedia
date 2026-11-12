@@ -54,4 +54,34 @@ public sealed record PlaybackNetworkDiagnosticInfo
     /// 最近网络错误。
     /// </summary>
     public string? LastNetworkError { get; init; }
+
+    /// <summary>
+    /// 当前或最近管线因缓冲策略丢弃的视频包数。
+    /// </summary>
+    public long DroppedVideoPacketCount { get; init; }
+
+    /// <summary>
+    /// 当前或最近管线因缓冲策略丢弃的音频包数。
+    /// </summary>
+    public long DroppedAudioPacketCount { get; init; }
+
+    /// <summary>
+    /// 当前或最近管线因 Seek 清理的视频包数。
+    /// </summary>
+    public long SeekDiscardedVideoPacketCount { get; init; }
+
+    /// <summary>
+    /// 当前或最近管线因 Seek 清理的音频包数。
+    /// </summary>
+    public long SeekDiscardedAudioPacketCount { get; init; }
+
+    /// <summary>
+    /// 当前或最近管线停止时清理的视频包数。
+    /// </summary>
+    public long StopDiscardedVideoPacketCount { get; init; }
+
+    /// <summary>
+    /// 当前或最近管线停止时清理的音频包数。
+    /// </summary>
+    public long StopDiscardedAudioPacketCount { get; init; }
 }

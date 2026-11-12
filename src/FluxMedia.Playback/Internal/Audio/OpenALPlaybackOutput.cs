@@ -6,7 +6,7 @@ namespace FluxMedia.Playback.Internal.Audio;
 /// <summary>
 /// Linux OpenAL 流式 PCM 输出实现。应用需要安装提供 libopenal.so.1 的 OpenAL 运行库。
 /// </summary>
-internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice, IPooledAudioOutputDevice
+internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
 {
     /// <summary>
     /// 最大已排队缓冲区。
@@ -313,11 +313,6 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice, IPooled
         var data = pcm.ToArray();
         Write(data, data.Length);
     }
-
-    /// <summary>
-    /// 写入数据供后续处理。
-    /// </summary>
-    void IPooledAudioOutputDevice.Write(byte[] pcm, int length) => Write(pcm, length);
 
     /// <summary>
     /// 写入数据供后续处理。

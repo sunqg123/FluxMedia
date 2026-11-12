@@ -59,7 +59,6 @@ macOS 使用 `lib{name}.{major}.dylib`。Unix 部署需要保留对应 ABI 名�
 跨主版本升级需检查结构布局、导出函数与调用约定，不能只替换 DLL 或修改绑定包版本。
 
 `FFmpegAutoGenVersion` 仅集中配置托管依赖版本，不代表所有绑定版本均可直接编译。
-测试源码的原生库目录统一读取 FFmpegFactAttribute.NativeRoot，优先使用 FLUXMEDIA_FFMPEG_ROOT。
 切换版本、原生目录或原生构建后应启动新进程；引擎 Shutdown 不卸载进程级原生函数绑定，不能用它热切换 ABI。
 
 不同 ABI 的库不能改名后直接使用。

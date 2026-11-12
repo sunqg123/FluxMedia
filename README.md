@@ -2,7 +2,7 @@
 
 FluxMedia 是 C# 播放核心，提供本地文件、网络播放、音频输出、Seek、录制和可选 Avalonia 显示控件。
 
-播放核心可用于自定义 UI，Avalonia 控件提供视频显示与播放器绑定。
+播放核心可用于自定义 UI。Avalonia 提供纯画面控件 `FluxPlayerView`，以及带基础操作、自动显隐和可自定义覆盖内容的 `FluxPlayerControl`。
 
 ## 主要功能
 
@@ -11,24 +11,23 @@ FluxMedia 是 C# 播放核心，提供本地文件、网络播放、音频输出
 - 点播支持 0.5～2 倍速，音频保持音调；直播不允许变速。
 - 播放输出录制，采用压缩数据包重封装。
 - 视频帧回调和异步消费，可接入自定义显示界面。
-- 可选 Avalonia 显示控件，以及独立静态日志入口。
+- 可选 Avalonia 播放器控件，提供基础命令和自定义控制栏、业务覆盖内容容器。
+- 独立静态日志入口。
 
 ## 项目结构
 
 | 目录 | 当前用途 |
 | --- | --- |
 | `src/FluxMedia.Playback` | 播放核心、静态日志及原生调用 |
-| `src/FluxMedia.Avalonia` | 可选的 Avalonia 显示控件 |
+| `src/FluxMedia.Avalonia` | 视频显示、基础操作与可自定义的 Avalonia 播放器控件 |
 | `src/Shared` | 两个库共用的编译器标记源码 |
 | `samples/FluxMedia.Avalonia.Sample` | 通过项目引用使用播放器的示例 |
-| `tests` | 当前单元、回归及 UI 消费项目源码，按需手动执行 |
 | `licenses` | 打包引用的第三方许可证 |
 | `FFmpeg` | Windows x64 原生库 |
 | `docs` | 当前 API、架构、部署和诊断说明 |
 | `Sample.mp4` | 示例视频素材 |
 
-两个库均以 `netstandard2.1` 为目标框架。当前示例使用 .NET 10 和 Avalonia 12.0.4，
-测试目录另外保留 Avalonia 11/12 的消费项目。
+两个库均以 `netstandard2.1` 为目标框架。当前示例使用 .NET 10 和 Avalonia 12.0.4。
 
 ## 原生依赖
 
@@ -78,23 +77,21 @@ await player.StopAsync();
 宿主退出时先释放播放器，再调用 `FluxEngine.ShutdownAsync`。
 自定义 UI 使用 `Player.CanSeek` 显示交互能力；直播的 Seek 在核心层同样被拒绝。
 
-## 示例与测试
+## 示例
 
-`samples/FluxMedia.Avalonia.Sample` 通过项目引用演示播放器接入和多播放器界面。
+`samples/FluxMedia.Avalonia.Sample` 通过项目引用演示播放器接入和多播放器界面，可用于播放功能调试。
 获取 Git LFS 文件后，可使用仓库根目录的 `Sample.mp4`，也可自行选择媒体文件。
 
-`tests` 保存核心回归用例和 Avalonia 消费项目。CI 仅手动触发，测试需显式启用；
-原生媒体测试需要匹配的共享库，外部流地址通过环境变量配置。
 生成输出和日志仍由 Git 忽略规则排除；`Sample.mp4` 和 FFmpeg 目录中的 DLL/EXE 通过 Git LFS 管理。
 
 ## 文档
 
 - [API 使用](docs/api.md)
+- [Avalonia 控件与自定义界面](docs/avalonia-controls.md)
 - [架构](docs/architecture.md)
 - [FFmpeg 部署与版本边界](docs/ffmpeg-deployment.md)
 - [日志](docs/logging.md)
 - [Seek 交互与权限](docs/seek-preview.md)
-- [原生库目录](docs/ffmpeg-deployment.md) · [测试目录](tests/README.md)
 
 ## 许可证
 

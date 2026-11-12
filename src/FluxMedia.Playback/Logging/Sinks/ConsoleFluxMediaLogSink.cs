@@ -3,7 +3,7 @@ using FluxMedia.Core.Configuration;
 namespace FluxMedia.Core.Logging;
 
 /// <summary>
-/// 控制台日志输出实现，适合 Demo、测试和命令行工具。
+/// 控制台日志输出，适用于示例和命令行应用。
 /// </summary>
 internal sealed class ConsoleFluxMediaLogSink : IFluxMediaLogSink
 {
@@ -36,7 +36,15 @@ internal sealed class ConsoleFluxMediaLogSink : IFluxMediaLogSink
             return;
         }
 
-        Console.WriteLine(FluxMediaLogFormatter.FormatConsoleLine(DateTimeOffset.Now, level, module, instanceId, Environment.CurrentManagedThreadId, message, exception));
+        var line = FluxMediaLogFormatter.FormatConsoleLine(
+            DateTimeOffset.Now,
+            level,
+            module,
+            instanceId,
+            Environment.CurrentManagedThreadId,
+            message,
+            exception);
+        Console.WriteLine(line);
     }
 }
 

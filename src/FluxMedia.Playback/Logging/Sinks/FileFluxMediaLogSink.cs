@@ -142,7 +142,9 @@ internal sealed class FileFluxMediaLogSink : IFluxMediaLogSink, IDisposable
             // 满载时丢弃新日志，避免挤掉已经入队的刷新屏障。
             _queue.TryAdd(record);
         }
-        catch (InvalidOperationException) { }
+        catch (InvalidOperationException)
+        {
+        }
     }
 
     /// <summary>
@@ -161,17 +163,22 @@ internal sealed class FileFluxMediaLogSink : IFluxMediaLogSink, IDisposable
             try
             {
                 if (_disposed || !_queue.TryAdd(new LogRecord(
-                DateTimeOffset.Now,
-                MinimumLevel,
-                nameof(FileFluxMediaLogSink),
-                Guid.Empty,
-                Environment.CurrentManagedThreadId,
-                string.Empty,
-                null,
-                    signal))) return;
+                    DateTimeOffset.Now,
+                    MinimumLevel,
+                    nameof(FileFluxMediaLogSink),
+                    Guid.Empty,
+                    Environment.CurrentManagedThreadId,
+                    string.Empty,
+                    null,
+                    signal)))
+                {
+                    return;
+                }
                 signal.Task.Wait(TimeSpan.FromSeconds(3));
             }
-            catch (InvalidOperationException) { }
+            catch (InvalidOperationException)
+            {
+            }
         }
     }
 
@@ -210,7 +217,10 @@ internal sealed class FileFluxMediaLogSink : IFluxMediaLogSink, IDisposable
     /// </summary>
     private void DisposeCompletedResources()
     {
-        if (Interlocked.Exchange(ref _resourcesDisposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _resourcesDisposed, 1) != 0)
+        {
+            return;
+        }
         _disposeToken.Dispose();
         _queue.Dispose();
     }
@@ -324,20 +334,27 @@ internal sealed class FileFluxMediaLogSink : IFluxMediaLogSink, IDisposable
     /// </summary>
     private static string FormatRecord(LogRecord record)
     {
-        return FluxMediaLogFormatter.FormatLine(record.Timestamp, record.Level, record.Module, record.InstanceId, record.ThreadId, record.Message, record.Exception);
+        return FluxMediaLogFormatter.FormatLine(
+            record.Timestamp,
+            record.Level,
+            record.Module,
+            record.InstanceId,
+            record.ThreadId,
+            record.Message,
+            record.Exception);
     }
 
     /// <summary>
     /// 待写入文件的日志记录。
     /// </summary>
-    /// <param name="Timestamp">当前帧或事件的时间戳。</param>
+    /// <param name="Timestamp">日志产生时间。</param>
     /// <param name="Level">日志的严重级别。</param>
-    /// <param name="Module">生成日志或错误的模块名称。</param>
-    /// <param name="InstanceId">当前组件的实例标识。</param>
-    /// <param name="ThreadId">生成日志的线程标识。</param>
-    /// <param name="Message">当前事件或操作的说明。</param>
+    /// <param name="Module">日志模块。</param>
+    /// <param name="InstanceId">播放器标识。</param>
+    /// <param name="ThreadId">日志产生线程。</param>
+    /// <param name="Message">事件或说明文本。</param>
     /// <param name="Exception">产生当前错误的原始异常。</param>
-    /// <param name="FlushSignal">通知日志刷新完成的信号。</param>
+    /// <param name="FlushSignal">刷新完成信号。</param>
     private sealed record LogRecord(
         DateTimeOffset Timestamp,
         LogLevel Level,

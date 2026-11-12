@@ -31,9 +31,19 @@ public sealed record PlaybackOptions
     public double InitialVolume { get; init; } = 1.0;
 
     /// <summary>
-    /// 初始点播速度为 0.5 到 2，直播固定为 1。
+    /// 初始点播速度，超出配置范围或预算时回退 1 倍；直播固定为 1。
     /// </summary>
     public double InitialPlaybackRate { get; init; } = 1.0;
+
+    /// <summary>
+    /// 播放中等待换速准备的超时，暂停待应用请求不计时。
+    /// </summary>
+    public TimeSpan PlaybackRateTimeout { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// 不可逆换速提交的看门狗时长，超时按管线故障处理。
+    /// </summary>
+    public TimeSpan PlaybackRateCommitTimeout { get; init; } = TimeSpan.FromSeconds(2);
 
     /// <summary>
     /// 是否以静音状态开始。
