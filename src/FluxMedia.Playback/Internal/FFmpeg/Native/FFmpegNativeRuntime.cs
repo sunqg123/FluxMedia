@@ -25,11 +25,6 @@ internal static unsafe class FFmpegNativeRuntime
     private static string? _loadedRootPath;
 
     /// <summary>
-    /// 当前共享环境是否已经就绪。
-    /// </summary>
-    public static bool IsInitialized => _isInitialized;
-
-    /// <summary>
     /// 加载并校验原生库，任何失败直接抛出异常。
     /// </summary>
     public static void Initialize(string? directory = null)

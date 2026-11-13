@@ -2,16 +2,16 @@ using System.Threading.Channels;
 
 namespace FluxMedia.FFmpeg.Pipeline;
 
-// 读取数据包并维护队列统计。
+// 读取数据包并维护缓冲水位。
 internal sealed unsafe partial class FFmpegPacketQueue
 {
     /// <summary>
-    /// 取出数据包时同步更新缓冲统计。
+    /// 取出数据包时同步更新缓冲水位。
     /// </summary>
     private sealed class TrackingPacketReader : ChannelReader<FFmpegPacketLease>
     {
         /// <summary>
-        /// 负责维护包数量和时间统计的队列。
+        /// 维护包数和缓冲时序的队列。
         /// </summary>
         private readonly FFmpegPacketQueue _owner;
 
@@ -21,7 +21,7 @@ internal sealed unsafe partial class FFmpegPacketQueue
         private readonly ChannelReader<FFmpegPacketLease> _inner;
 
         /// <summary>
-        /// 初始化统计数据包读取器所需的状态和资源。
+        /// 绑定缓冲队列和底层读取器。
         /// </summary>
         public TrackingPacketReader(FFmpegPacketQueue owner, ChannelReader<FFmpegPacketLease> inner)
         {
@@ -45,7 +45,7 @@ internal sealed unsafe partial class FFmpegPacketQueue
         public override int Count => _owner.Count;
 
         /// <summary>
-        /// 尝试取出一个数据包并更新统计。
+        /// 尝试取出数据包并更新缓冲水位。
         /// </summary>
         public override bool TryRead(out FFmpegPacketLease item)
         {

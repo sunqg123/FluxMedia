@@ -18,7 +18,7 @@ internal sealed class PlaybackRecordingController
     /// <summary>
     /// 最近一次录制状态。
     /// </summary>
-    private PlaybackRecordingDiagnosticInfo _snapshot = new() { State = PlaybackRecordingState.Idle };
+    private PlaybackRecordingResult _snapshot = new() { State = PlaybackRecordingState.Idle };
     /// <summary>
     /// 是否存在进行中或等待管线的录制请求。
     /// </summary>
@@ -27,25 +27,23 @@ internal sealed class PlaybackRecordingController
     /// <summary>
     /// 启动录制；管线尚未建立时保留请求。
     /// </summary>
-    public PlaybackResult Start(PlaybackRecordingOptions options, FFmpegSharedDemuxer? demuxer, bool includesAudio)
+    public PlaybackResult Start(PlaybackRecordingOptions options, FFmpegSharedDemuxer? demuxer)
     {
         if (options is null) return PlaybackResult.Failure(PlaybackError.InvalidState, "录制参数不能为空。");
         if (IsRecording) return PlaybackResult.Success();
         try
         {
             var actual = options with { OutputPath = Path.GetFullPath(options.OutputPath) };
-            _snapshot = new PlaybackRecordingDiagnosticInfo
+            _snapshot = new PlaybackRecordingResult
             {
                 State = PlaybackRecordingState.Recording,
                 OutputPath = actual.OutputPath,
-                StartedAt = DateTimeOffset.UtcNow,
-                IncludesAudio = includesAudio
             };
             if (demuxer is null) _pending = actual;
             else
             {
                 demuxer.StartRecording(actual);
-                _snapshot = demuxer.RecordingDiagnostic ?? _snapshot;
+                _snapshot = demuxer.RecordingResult ?? _snapshot;
             }
             IsRecording = true;
             return PlaybackResult.Success();
@@ -53,12 +51,10 @@ internal sealed class PlaybackRecordingController
         catch (Exception exception)
         {
             _pending = null;
-            _snapshot = new PlaybackRecordingDiagnosticInfo
+            _snapshot = new PlaybackRecordingResult
             {
                 State = PlaybackRecordingState.Failed,
                 OutputPath = options.OutputPath,
-                StoppedAt = DateTimeOffset.UtcNow,
-                IncludesAudio = includesAudio,
                 LastError = exception.Message
             };
             return PlaybackResult.Failure(PlaybackError.RecordingFailed, exception.Message);
@@ -75,7 +71,7 @@ internal sealed class PlaybackRecordingController
         var recorder = demuxer.DetachRecording();
         if (recorder is null) return;
         _detached = recorder;
-        _snapshot = recorder.Diagnostic;
+        _snapshot = recorder.Result;
     }
     /// <summary>
     /// 新管线就绪后继续同一录制文件，或执行等待中的录制请求。
@@ -110,17 +106,16 @@ internal sealed class PlaybackRecordingController
                 var recorder = _detached;
                 _detached = null;
                 try { await recorder.DisposeAsync().ConfigureAwait(false); }
-                finally { _snapshot = recorder.Diagnostic; }
+                finally { _snapshot = recorder.Result; }
             }
             else if (demuxer is not null)
                 _snapshot = await demuxer.StopRecordingAsync().ConfigureAwait(false) ?? _snapshot with
                 {
                     State = PlaybackRecordingState.Failed,
-                    StoppedAt = DateTimeOffset.UtcNow,
                     LastError = "停止录制时未找到活动录制器，无法确认最终结果。"
                 };
             else
-                _snapshot = _snapshot with { State = PlaybackRecordingState.Completed, StoppedAt = DateTimeOffset.UtcNow };
+                _snapshot = _snapshot with { State = PlaybackRecordingState.Completed };
             return _snapshot.State == PlaybackRecordingState.Completed ? PlaybackResult.Success() : PlaybackResult.Failure(PlaybackError.RecordingFailed, _snapshot.LastError ?? "录制未能正常完成。");
         }
         catch (Exception exception)
@@ -128,7 +123,6 @@ internal sealed class PlaybackRecordingController
             _snapshot = _snapshot with
             {
                 State = PlaybackRecordingState.Failed,
-                StoppedAt = DateTimeOffset.UtcNow,
                 LastError = exception.Message
             };
             return PlaybackResult.Failure(PlaybackError.RecordingFailed, exception.Message);
@@ -138,13 +132,13 @@ internal sealed class PlaybackRecordingController
     /// <summary>
     /// 返回当前活动录制器或最近一次封装状态。
     /// </summary>
-    public PlaybackRecordingDiagnosticInfo Snapshot(FFmpegSharedDemuxer? demuxer) => IsRecording ? _detached?.Diagnostic ?? demuxer?.RecordingDiagnostic ?? _snapshot : _snapshot;
+    public PlaybackRecordingResult GetResult(FFmpegSharedDemuxer? demuxer) => IsRecording ? _detached?.Result ?? demuxer?.RecordingResult ?? _snapshot : _snapshot;
     /// <summary>
-    /// 打开新媒体前清除已结束录制的诊断。
+    /// 打开新媒体前清除已结束录制的结果。
     /// </summary>
     public void Reset()
     {
         if (IsRecording) throw new InvalidOperationException("应先停止旧媒体的录制。");
-        _snapshot = new PlaybackRecordingDiagnosticInfo { State = PlaybackRecordingState.Idle };
+        _snapshot = new PlaybackRecordingResult { State = PlaybackRecordingState.Idle };
     }
 }

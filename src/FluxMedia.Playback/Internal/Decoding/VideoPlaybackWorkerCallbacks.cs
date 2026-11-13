@@ -11,11 +11,10 @@ internal sealed class VideoPlaybackWorkerCallbacks
     /// <summary>
     /// 绑定本代管线的依赖，不接管资源释放。
     /// </summary>
-    public VideoPlaybackWorkerCallbacks(Action<VideoFrame> frameReady, Action<PlaybackWorkerDiagnostics> diagnostics, Func<AudioPlaybackDiagnostics?> audioDiagnostics, Func<TimeSpan> bufferedDuration, Func<int> bufferedPacketCount, Func<VideoOutputCapabilities> videoCapabilities, FFmpegPacketConsumer? packetConsumed = null)
+    public VideoPlaybackWorkerCallbacks(Action<VideoFrame> frameReady, Func<AudioClockSnapshot?> audioClock, Func<TimeSpan> bufferedDuration, Func<int> bufferedPacketCount, Func<VideoOutputCapabilities> videoCapabilities, FFmpegPacketConsumer? packetConsumed = null)
     {
         FrameReady = frameReady ?? throw new ArgumentNullException(nameof(frameReady));
-        Diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
-        AudioDiagnostics = audioDiagnostics ?? throw new ArgumentNullException(nameof(audioDiagnostics));
+        AudioClock = audioClock ?? throw new ArgumentNullException(nameof(audioClock));
         BufferedDuration = bufferedDuration ?? throw new ArgumentNullException(nameof(bufferedDuration));
         BufferedPacketCount = bufferedPacketCount ?? throw new ArgumentNullException(nameof(bufferedPacketCount));
         VideoCapabilities = videoCapabilities ?? throw new ArgumentNullException(nameof(videoCapabilities));
@@ -28,14 +27,9 @@ internal sealed class VideoPlaybackWorkerCallbacks
     public Action<VideoFrame> FrameReady { get; }
 
     /// <summary>
-    /// 上报视频工作状态。
-    /// </summary>
-    public Action<PlaybackWorkerDiagnostics> Diagnostics { get; }
-
-    /// <summary>
     /// 读取最新音频时钟信息。
     /// </summary>
-    public Func<AudioPlaybackDiagnostics?> AudioDiagnostics { get; }
+    public Func<AudioClockSnapshot?> AudioClock { get; }
 
     /// <summary>
     /// 读取当前视频缓冲时长。

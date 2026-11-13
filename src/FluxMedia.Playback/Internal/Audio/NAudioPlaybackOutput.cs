@@ -31,11 +31,6 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     private PcmAudioFormat? _format;
 
     /// <summary>
-    /// 已写入字节。
-    /// </summary>
-    private long _writtenBytes;
-
-    /// <summary>
     /// 音频设备期望的缓冲延迟（毫秒）。
     /// </summary>
     private const int DesiredLatencyMs = 100;
@@ -84,22 +79,6 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     public AudioOutputState State => _state;
 
     /// <summary>
-    /// 获取当前运行状态和诊断信息。
-    /// </summary>
-    public AudioOutputDiagnosticInfo GetDiagnosticInfo() => new()
-    {
-        BackendName = BackendName,
-        State = _state,
-        Format = _format,
-        WrittenBytes = Interlocked.Read(ref _writtenBytes),
-        LastError = LastError,
-        IsMuted = _muted,
-        Volume = _volume,
-        BufferedDuration = GetBufferedDuration(),
-        DeviceDelay = GetDeviceDelay()
-    };
-
-    /// <summary>
     /// 按 PCM 格式创建 Windows 音频播放设备。
     /// </summary>
     public void Initialize(int sampleRate, int channels)
@@ -121,7 +100,6 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
             _waveOut.Init(_buffer);
             _format = new PcmAudioFormat(sampleRate, channels);
             _state = AudioOutputState.Initialized;
-            FluxMediaLog.Write(LogLevel.Information, nameof(NAudioPlaybackOutput), _instanceId, $"Event=AudioOutputInitialized Backend={BackendName} SampleRate={sampleRate} Channels={channels}");
         }
         catch (Exception ex)
         {
@@ -227,7 +205,6 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
             if (buffer.BufferLength - buffer.BufferedBytes >= length)
             {
                 buffer.AddSamples(data, 0, length);
-                Interlocked.Add(ref _writtenBytes, length);
                 return;
             }
             Thread.Sleep(5);

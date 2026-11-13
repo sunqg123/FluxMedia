@@ -69,6 +69,10 @@ ControlBarTemplate 的数据是 `FluxMedia.Avalonia.Bindings.PlayerBinding`，�
 控件创建并管理该适配器，外部仍直接绑定 Player，无须另外维护集合或视图模型。
 `FluxPlayerControl.Presentation` 暴露当前绑定对象，模板外可绑定 `#PlaybackControl.Presentation.State` 等属性。
 绑定对象保存拖动预览；真实位置从其 Player.Position 或核心进度事件读取。
+进度数值按实际变化通知，保留核心原有更新节奏；总时长只在变化时通知，时间文本按显示秒数变化生成并缓存。
+普通控制刷新按播放状态、倍速和音量分组比较，仅通知发生变化的组；录制诊断沿用控制刷新通知，由订阅方按需读取。
+控制请求失败时仍会回读实际值，不能因值未改变而省略恢复界面的通知。
+PlayerBinding.Recording 在媒体切换中可能为空；控制权限和录制状态继续使用 CanSeek、CanChangeSpeed、RecordingState 等业务属性。
 命令通过父级 FluxPlayerControl 获取，无须使用方包装播放器集合项。
 不提供控制栏模板时，只显示画面和使用方覆盖内容，不生成按钮或播放器文本。
 

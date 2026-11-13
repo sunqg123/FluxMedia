@@ -12,12 +12,7 @@ namespace FluxMedia.Playback.Internal.Hardware;
 internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
 {
     /// <summary>
-    /// 硬件设备上下文方法。
-    /// </summary>
-    private const int HardwareDeviceContextMethod = 0x01;
-
-    /// <summary>
-    /// 读取显示端输出能力的回调。
+    /// 供 FFmpeg 选择硬件像素格式的回调。
     /// </summary>
     private readonly AVCodecContext_get_format _getFormat;
 
@@ -59,7 +54,7 @@ internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
 
         try
         {
-            var hardwarePixelFormat = FindHardwarePixelFormat(codec, AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI);
+            var hardwarePixelFormat = HardwarePixelFormats.Find(codec, AVHWDeviceType.AV_HWDEVICE_TYPE_VAAPI);
             if (hardwarePixelFormat == AVPixelFormat.AV_PIX_FMT_NONE)
             {
                 error = "The selected FFmpeg decoder does not expose a VAAPI hardware configuration.";
@@ -131,37 +126,7 @@ internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
     /// 从候选格式中选择硬件像素格式。
     /// </summary>
     private AVPixelFormat SelectHardwarePixelFormat(AVCodecContext* _, AVPixelFormat* formats)
-    {
-        for (var current = formats; current != null && *current != AVPixelFormat.AV_PIX_FMT_NONE; current++)
-        {
-            if (*current == _hardwarePixelFormat)
-            {
-                return *current;
-            }
-        }
-
-        return AVPixelFormat.AV_PIX_FMT_NONE;
-    }
-
-    /// <summary>
-    /// 查找解码器支持的硬件像素格式。
-    /// </summary>
-    private static AVPixelFormat FindHardwarePixelFormat(AVCodec* codec, AVHWDeviceType deviceType)
-    {
-        for (var index = 0; ; index++)
-        {
-            var configuration = ffmpeg.avcodec_get_hw_config(codec, index);
-            if (configuration == null)
-            {
-                return AVPixelFormat.AV_PIX_FMT_NONE;
-            }
-
-            if (configuration->device_type == deviceType && (configuration->methods & HardwareDeviceContextMethod) != 0)
-            {
-                return configuration->pix_fmt;
-            }
-        }
-    }
+        => HardwarePixelFormats.Select(formats, _hardwarePixelFormat);
 
     /// <summary>
     /// 对象已释放时阻止继续操作。

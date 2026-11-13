@@ -24,6 +24,13 @@ await player.StopAsync();
 `CreatePlayer` 不会隐式启动或重试初始化；未启动或正在关闭时抛出 `InvalidOperationException`。
 重复启动可复用相同配置，传入不同配置会被拒绝。原生库路径只在引擎启动时配置，不属于媒体播放选项。
 应用退出时调用 `FluxEngine.ShutdownAsync`。原生库和函数绑定保留到进程退出，切换库目录需重启进程。
+Player 在释放通知前登记共享任务，重复或通知回调中的 DisposeAsync 调用取得同一任务；清理异常与取消会传回等待者。
+通知处理函数仍需及时返回，不应在释放通知内部同步阻塞等待该释放任务。
+打开、打开并播放和录制命令统一经过锁前、锁后的释放检查；排队期间开始释放的命令取得锁后不会再访问会话。
+OpenAndPlayAsync 在打开完成及通知之后还会检查释放状态，避免通知回调触发释放后继续启动播放。
+
+`SetVolumeAsync` 只接受 0～1 之间的有限值，非法值沿用 PlaybackException / InvalidState 的错误反馈，拒绝后不改音量或调用设备。
+创建播放器时，InitialVolume 为 NaN 或无穷值会抛出配置异常；有限值超出 0～1 时沿用边界截取行为。
 
 ## 打开媒体
 
@@ -33,6 +40,44 @@ await player.StopAsync();
 网络输入要求有效的绝对地址与主机，当前允许 `http`、`https`、`rtsp`、`rtmp`。
 不支持的协议直接报错，`.m3u8` 后缀不改变协议支持范围。
 打开失败通过 `PlaybackException` 和 `Faulted` 反馈；基础输入校验在结束旧媒体之前执行。
+
+## 网络配置
+
+网络超时只从 PlaybackOptions.Network 读取，不再与总超时取较小值。
+本地文件仍使用 PlaybackOptions.OpenTimeout，默认 15 秒。
+
+| 配置 | 职责 | 默认值 |
+| --- | --- | --- |
+| Network.OpenTimeout | 网络打开超时 | 6 秒 |
+| Network.ReadTimeout | 每次网络读包超时 | 4 秒 |
+| Network.FFmpegReconnectDelayMax | HTTP(S) 原生重连的 reconnect_delay_max，单位为秒 | 2 |
+| Network.ReconnectDelay | 核心两次网络恢复尝试之间的固定等待 | 2 秒 |
+
+NetworkPlaybackOptions.LowLatency() 和 Compatible() 是显式参数预设；Compatible 的打开/读取超时分别为 12/8 秒，直接生效。
+LowLatencyMode 控制低延迟策略；TimingMode 控制调度方式，没有额外的 Mode 标签决定参数。
+创建播放器和打开媒体前会校验网络配置：打开/读取超时必须大于零，重连间隔不能为负数。
+超时和本地重试间隔不超过 int.MaxValue 毫秒；无效配置在替换旧媒体前直接抛出异常。
+
+```csharp
+var options = new PlaybackOptions
+{
+    Network = NetworkPlaybackOptions.LowLatency() with
+    {
+        OpenTimeout = TimeSpan.FromSeconds(15),
+        ReadTimeout = TimeSpan.FromSeconds(6),
+        FFmpegReconnectDelayMax = 3,
+        ReconnectDelay = TimeSpan.FromSeconds(1)
+    }
+};
+```
+
+迁移旧配置：删除 Mode 和 NetworkPlaybackMode，改用预设或显式参数。
+原 NetworkTimeout 的需求分别填入 Network.OpenTimeout 与 Network.ReadTimeout；若需保留旧实际行为，请按旧的取较小值规则填写最终时长。
+原 ReconnectDelayMax 同时配置两种重连行为，现在分别设置 FFmpegReconnectDelayMax（秒）与 ReconnectDelay（TimeSpan）；没有旧入口转发层。
+协议、探测、Seek 和直播倍速权限规则保持原样。
+NetworkReconnectAttempts 表示每次断流最多恢复尝试次数，默认 3；一次恢复过程成功后，下一次断流重新计数，不消耗整段播放的累计预算。
+恢复成功沿用当前判定：新管线完成打开并启动；之后的运行故障作为新断流处理，不代表经过了长时间稳定性确认。
+Network.ConfiguredReconnectAttempts 是每次断流的上限；诊断不再提供累计尝试次数。
 
 ## 播放时序
 
@@ -133,6 +178,12 @@ if (player.CanChangeSpeed)
 ## 核心状态与界面绑定
 
 Player 不捕获 SynchronizationContext，不实现 INotifyPropertyChanged，也不拼接显示时间文本。
+`Diagnostics` 与 `Internal` 同级，集中存放诊断模型和按需读取代码；公开诊断类型的命名空间保持不变。
+GetDiagnosticInfo 只投影现有播放事实，不订阅播放事件、不轮询健康、不记录阶段耗时，也不影响播放决策。
+音频同步直接使用 AudioClockSnapshot；Seek 与录制分别使用自己的执行状态和操作结果。
+没有数据来源的计数、阶段耗时、轨迹和硬解执行详情字段已删除，不保留空字段或兼容转发。
+查询前后校验既有管线、媒体、配置和操作身份；打开/停止期间或两次读取仍不稳定时，GetDiagnosticInfo、GetRecordingDiagnosticInfo 和 Player.Recording 返回 null。
+成功快照的 State、IsSpeedChangePending 与其他数据一起读取；保留的可空成员表示当前不可用，详见 [诊断边界](diagnostics.md)。
 StateChanged、PositionChanged、Faulted 和 PlaybackChanged 在触发线程通知，调用方负责自己的线程派发，事件处理应及时返回。
 PlaybackChanged 表示媒体、控制值、倍速请求或释放状态变化；读取 Player 的只读属性可得到当前值。
 Avalonia 的 PlayerBinding 合并这些通知并派发到 UI 线程，处理拖动预览、双向赋值和失败回读。
@@ -171,15 +222,15 @@ await player.StopRecordingAsync();
 
 停止录制的取消令牌在接受停止前生效；开始收尾后会等待排空、封装和释放，
 返回实际文件结果，避免已完成的文件被标记为取消失败。
-录制诊断的 `VideoCodec` 为源编码名称，未知时为空字符串。
+录制诊断的 `VideoCodec` 从当前媒体信息读取，未知时为 null。
 `OutputFileFinalized` 表示文件尾写入和 IO 关闭均成功；实际文件录制未收到有效数据包时为 `Failed`。
-文件大小查询失败不会改变录制结果，相关文件信息保留已有值。
+文件大小和存在状态仅在显式读取录制诊断时查询；读取失败返回 null，不改变录制结果。
+录制开始/结束墙钟与录制时长不再专门维护，已删除对应字段。
 成功完成时清空 `LastError`；停止时找不到应有的录制器则返回失败，诊断收敛为 `Failed`。
 
 管线清理失败时，停止命令先进入 `Stopped`，再向调用方反馈清理异常；
 新管线打开失败时先进入 `Failed`，异常同时保留打开和清理失败的信息。
 
-`GetDiagnosticInfo().LastSeek.ActualPosition` 为跳转后首个有效输出帧的时间戳，
-尚无输出帧或跳转到媒体末尾而未出帧时为空。
-网络诊断中的包计数针对当前或最近一代管线：`Dropped*PacketCount` 表示缓冲策略丢弃，
-`SeekDiscarded*PacketCount` 和 `StopDiscarded*PacketCount` 分别表示主动 Seek 与停止清理。
+`player.GetDiagnosticInfo()?.LastSeek?.ActualPosition` 只在当前跳转仍保留已完成的首帧任务时可读，其他情况返回 null。
+Seek 自适应合并仍使用执行所需的定位耗时、首帧耗时和合并数量；不维护额外轨迹或历史首帧记录。
+网络包丢弃计数、累计重连次数和读取超时累计次数字段已删除。

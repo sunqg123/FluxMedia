@@ -34,16 +34,6 @@ internal sealed class NullAudioOutputDevice : IAudioOutputDevice
     public AudioOutputState State => AudioOutputState.Unavailable;
 
     /// <summary>
-    /// 获取当前运行状态和诊断信息。
-    /// </summary>
-    public AudioOutputDiagnosticInfo GetDiagnosticInfo() => new()
-    {
-        BackendName = BackendName,
-        State = State,
-        LastError = LastError
-    };
-
-    /// <summary>
     /// 记录音频格式并将空输出设备设为就绪。
     /// </summary>
     public void Initialize(int sampleRate, int channels)

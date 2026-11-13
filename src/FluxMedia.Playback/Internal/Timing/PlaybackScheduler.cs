@@ -46,9 +46,9 @@ internal sealed class PlaybackScheduler
     private readonly Func<bool> _shouldStop;
 
     /// <summary>
-    /// 读取最新音频诊断的回调。
+    /// 读取最新音频同步时钟的回调。
     /// </summary>
-    private readonly Func<AudioPlaybackDiagnostics?> _audioDiagnostics;
+    private readonly Func<AudioClockSnapshot?> _audioClock;
 
     /// <summary>
     /// 读取视频缓冲时长的回调。
@@ -103,12 +103,12 @@ internal sealed class PlaybackScheduler
     /// <summary>
     /// 初始化播放调度器所需的状态和资源。
     /// </summary>
-    public PlaybackScheduler(PlaybackTimingMode timingMode, Func<double> playbackRate, Func<bool> shouldStop, Func<AudioPlaybackDiagnostics?>? audioDiagnostics = null, Func<TimeSpan>? videoBufferedDuration = null, Func<int>? videoBufferedPacketCount = null, TimeSpan? minBufferDuration = null, TimeSpan? maxLowLatencyDelay = null)
+    public PlaybackScheduler(PlaybackTimingMode timingMode, Func<double> playbackRate, Func<bool> shouldStop, Func<AudioClockSnapshot?>? audioClock = null, Func<TimeSpan>? videoBufferedDuration = null, Func<int>? videoBufferedPacketCount = null, TimeSpan? minBufferDuration = null, TimeSpan? maxLowLatencyDelay = null)
     {
         _timingMode = timingMode;
         _playbackRate = playbackRate;
         _shouldStop = shouldStop;
-        _audioDiagnostics = audioDiagnostics ?? (() => null);
+        _audioClock = audioClock ?? (() => null);
         _videoBufferedDuration = videoBufferedDuration ?? (() => TimeSpan.Zero);
         _videoBufferedPacketCount = videoBufferedPacketCount ?? (() => 0);
         _minBufferDuration = minBufferDuration ?? TimeSpan.FromMilliseconds(500);
@@ -218,15 +218,15 @@ internal sealed class PlaybackScheduler
     /// </summary>
     private TimeSpan? GetAudioClock()
     {
-        var audio = _audioDiagnostics();
-        if (audio?.PresentationTime is null || audio.WorkerState != "Running" || audio.OutputBufferedDuration is null || audio.OutputBufferedDuration <= TimeSpan.Zero)
+        var audio = _audioClock();
+        if (audio?.PresentationTime is null || !audio.IsRunning || audio.BufferedDuration <= TimeSpan.Zero)
         {
             return null;
         }
 
         _audioRate = PlaybackRatePolicy.Normalize(audio.PlaybackRate);
-        var buffered = audio.OutputBufferedDuration ?? TimeSpan.Zero;
-        var deviceDelay = audio.OutputDeviceDelay ?? TimeSpan.Zero;
+        var buffered = audio.BufferedDuration;
+        var deviceDelay = audio.DeviceDelay;
         if (audio.UpdatedAt == default) return null;
         var elapsed = DateTimeOffset.UtcNow - audio.UpdatedAt;
         if (elapsed < TimeSpan.Zero)

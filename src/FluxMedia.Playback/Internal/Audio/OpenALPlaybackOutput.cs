@@ -84,11 +84,6 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     private PcmAudioFormat? _format;
 
     /// <summary>
-    /// 已写入字节。
-    /// </summary>
-    private long _writtenBytes;
-
-    /// <summary>
     /// 当前音频设备中尚未回收的字节数。
     /// </summary>
     private long _queuedBytes;
@@ -147,28 +142,6 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     public AudioOutputState State => _state;
 
     /// <summary>
-    /// 获取当前运行状态和诊断信息。
-    /// </summary>
-    public AudioOutputDiagnosticInfo GetDiagnosticInfo()
-    {
-        lock (_syncRoot)
-        {
-            return new AudioOutputDiagnosticInfo
-            {
-                BackendName = BackendName,
-                State = _state,
-                Format = _format,
-                WrittenBytes = Interlocked.Read(ref _writtenBytes),
-                LastError = LastError,
-                IsMuted = _muted,
-                Volume = _volume,
-                BufferedDuration = GetBufferedDuration(),
-                DeviceDelay = GetDeviceDelay()
-            };
-        }
-    }
-
-    /// <summary>
     /// 打开 OpenAL 设备并创建音频源和缓冲区。
     /// </summary>
     public void Initialize(int sampleRate, int channels)
@@ -212,8 +185,6 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
                 _format = new PcmAudioFormat(sampleRate, channels);
                 _state = AudioOutputState.Initialized;
                 ApplyVolume();
-                FluxMediaLog.Write(
-                    LogLevel.Information, nameof(OpenALPlaybackOutput), _instanceId, $"Event=AudioOutputInitialized Backend={BackendName} SampleRate={sampleRate} Channels={channels}");
             }
             catch (Exception ex)
             {
@@ -332,7 +303,6 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
                 {
                     QueuePcmBuffer(pcm, length);
                     EnsurePlaying();
-                    Interlocked.Add(ref _writtenBytes, length);
                     return;
                 }
             }
@@ -386,8 +356,6 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
             {
                 ReleaseNativeResources();
                 _state = AudioOutputState.Disposed;
-                FluxMediaLog.Write(
-                    LogLevel.Information, nameof(OpenALPlaybackOutput), _instanceId, $"Event=DisposeAudio Backend={BackendName} WrittenBytes={Interlocked.Read(ref _writtenBytes)}");
             }
         }
     }
@@ -471,31 +439,28 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         OpenALNative.AlGetSourcei(_source, AlBuffersProcessed, out var processed);
         ThrowIfAlError("alGetSourcei(AL_BUFFERS_PROCESSED)");
-        for (var index = 0; index < processed; index++)
-        {
-            OpenALNative.AlSourceUnqueueBuffers(_source, 1, out var buffer);
-            ThrowIfAlError("alSourceUnqueueBuffers");
-            if (buffer != 0)
-            {
-                OpenALNative.AlDeleteBuffers(1, ref buffer);
-                ThrowIfAlError("alDeleteBuffers");
-            }
-
-            if (_queuedBufferSizes.Count > 0)
-            {
-                Interlocked.Add(ref _queuedBytes, -_queuedBufferSizes.Dequeue());
-            }
-        }
+        UnqueueBuffers(processed);
     }
 
     /// <summary>
-    /// 停止并回收音频源中的缓冲区。
+    /// 回收全部排队缓冲并清零统计。
     /// </summary>
     private void ClearQueuedBuffers()
     {
         OpenALNative.AlGetSourcei(_source, AlBuffersQueued, out var queued);
         ThrowIfAlError("alGetSourcei(AL_BUFFERS_QUEUED)");
-        for (var index = 0; index < queued; index++)
+        UnqueueBuffers(queued);
+
+        _queuedBufferSizes.Clear();
+        Interlocked.Exchange(ref _queuedBytes, 0);
+    }
+
+    /// <summary>
+    /// 回收指定数量的缓冲；调用方持有设备锁。
+    /// </summary>
+    private void UnqueueBuffers(int count)
+    {
+        for (var index = 0; index < count; index++)
         {
             OpenALNative.AlSourceUnqueueBuffers(_source, 1, out var buffer);
             ThrowIfAlError("alSourceUnqueueBuffers");
@@ -510,9 +475,6 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
                 Interlocked.Add(ref _queuedBytes, -_queuedBufferSizes.Dequeue());
             }
         }
-
-        _queuedBufferSizes.Clear();
-        Interlocked.Exchange(ref _queuedBytes, 0);
     }
 
     /// <summary>

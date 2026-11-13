@@ -18,18 +18,18 @@ internal sealed class PlaybackFramePump : IDisposable
         SingleWriter = false
     });
     /// <summary>
-    /// 跨管线累计的公开输出与统计。
+    /// 跨管线共用的公开帧输出。
     /// </summary>
     private readonly PlaybackVideoFrameHub _output;
     /// <summary>
     /// 绑定本次管线的帧回调。
     /// </summary>
-    private readonly Func<VideoFrame, long, ValueTask> _publish;
+    private readonly Func<VideoFrame, ValueTask> _publish;
 
     /// <summary>
     /// 绑定输出端与帧回调。
     /// </summary>
-    public PlaybackFramePump(PlaybackVideoFrameHub output, Func<VideoFrame, long, ValueTask> publish)
+    public PlaybackFramePump(PlaybackVideoFrameHub output, Func<VideoFrame, ValueTask> publish)
     {
         _output = output;
         _publish = publish;
@@ -43,18 +43,15 @@ internal sealed class PlaybackFramePump : IDisposable
         if (!frame.IsCurrent)
         {
             frame.Dispose();
-            _output.RecordDrop();
             return;
         }
         while (_input.Reader.TryRead(out var previous))
         {
             previous.Dispose();
-            _output.RecordDrop();
         }
         if (!_input.Writer.TryWrite(frame))
         {
             frame.Dispose();
-            _output.RecordDrop();
         }
     }
     /// <summary>
@@ -73,7 +70,7 @@ internal sealed class PlaybackFramePump : IDisposable
                 try
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    if (!frame.IsCurrent) { _output.RecordDrop(); continue; }
+                    if (!frame.IsCurrent) continue;
                     // 视频链路③转交：Hub 分发后调用会话发布回调。
                     await _output.PublishAsync(frame, _publish).ConfigureAwait(false);
                 }
@@ -91,7 +88,6 @@ internal sealed class PlaybackFramePump : IDisposable
         while (_input.Reader.TryRead(out var frame))
         {
             frame.Dispose();
-            _output.RecordDrop();
         }
     }
 }

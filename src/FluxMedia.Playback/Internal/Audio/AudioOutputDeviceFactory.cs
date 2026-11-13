@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 namespace FluxMedia.Playback.Internal.Audio;
 
 /// <summary>
-/// 音频输出设备工厂。Windows 使用 NAudio，Linux 使用系统 OpenAL。
+/// 创建平台音频输出：Windows 使用 NAudio，Linux/macOS 使用 OpenAL。
 /// </summary>
 internal static class AudioOutputDeviceFactory
 {
@@ -22,6 +22,6 @@ internal static class AudioOutputDeviceFactory
             return new OpenALPlaybackOutput(instanceId);
         }
 
-        return new NullAudioOutputDevice("当前平台暂未接入播放器音频输出后端。Windows 支持 NAudio，Linux 支持 OpenAL。");
+        return new NullAudioOutputDevice("当前平台暂未接入播放器音频输出后端。Windows 支持 NAudio，Linux/macOS 使用 OpenAL。");
     }
 }

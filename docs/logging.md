@@ -43,14 +43,11 @@ yyyy-MM-dd HH:mm:ss.fff [级别] [模块] SessionId=播放器标识 ThreadId=线
 播放控件的失败日志包含 `Operation`，可区分播放/暂停、停止、快进和后退。
 宿主通过 `SetSink` 接管日志时，仍接收原始参数，可自行决定输出格式。
 
-## Seek 诊断
+## 播放错误与诊断
 
-- MediaSeekPermission：内容判断与 Seek 权限。
-- SeekBindingSubmitted / SeekTrace：提交、合并、定位、首帧及结束。
-- SeekRejected 等拒绝事件：直播或不可定位源的后端拦截。
-- SeekPacketGeneration / SeekFirstVideoPacket：包代次及首包关键帧标记。
-- SeekFrameScheduling：定位首帧的调度策略。
-- VideoTimelinePresented：同一 TimelineId 的首次 Avalonia 显示提交。
+正常播放保留必要的拒绝、故障、回退和清理错误日志。
+核心不再维护 SeekTrace、首包跟踪、阶段耗时日志或健康轮询日志。
+Sample 的绑定提交日志和 Avalonia 显示日志由各自项目决定，不作为核心播放控制的输入。
 
-FirstUI 是核心帧回调，不是物理显示时刻。
+诊断只读取已有状态；缺失指标不靠额外日志或正常流程统计补齐，详见 [诊断边界](diagnostics.md)。
 读取或分享日志时应过滤源认证信息，原始运行日志不提交到 Git。

@@ -222,17 +222,22 @@ public sealed class PlayerItemViewModel : NotifyObject, IDisposable
         }
         var diagnostic = Player.GetDiagnosticInfo();
         var recording = Player.GetRecordingDiagnosticInfo();
-        RecordingText = $"{recording.State} · 包 {recording.EncodedFrameCount}/{recording.ReceivedFrameCount}"
+        RecordingText = recording is null ? "录制诊断暂不可用" : $"{recording.State} · 已写包 {recording.EncodedFrameCount}"
+            + (recording.OutputFileSize.HasValue ? $" · {recording.OutputFileSize.Value} 字节" : string.Empty)
             + (string.IsNullOrWhiteSpace(recording.LastError) ? string.Empty : $" · {recording.LastError}");
-        DiagnosticText = $"解码：{diagnostic.VideoDecoderBackend}\n"
-            + $"显示：{diagnostic.VideoPresentationBackend}\n"
-            + $"硬解：请求={diagnostic.HardwareAccelerationRequested}，启用={diagnostic.HardwareAccelerationActive}\n"
-            + $"降级：{diagnostic.HardwareAccelerationFailureReason ?? "-"}\n"
-            + $"帧：输出={diagnostic.VideoFrameReadyCount}，解码={diagnostic.DecodedFrameCount}，丢弃={diagnostic.DroppedFrameCount}\n"
-            + $"当前倍速：{diagnostic.AppliedRate:0.###}，{(Player.IsSpeedChangePending ? "等待应用" : "无待应用请求")}\n"
+        if (diagnostic is null)
+        {
+            DiagnosticText = "媒体状态正在切换，诊断快照暂不可用。";
+            return;
+        }
+        DiagnosticText = $"状态：{diagnostic.State}，时序：{diagnostic.TimingMode?.ToString() ?? "未建立管线"}\n"
+            + $"协议：{diagnostic.Protocol ?? "未打开"}，容器：{diagnostic.Container ?? "未知"}\n"
+            + $"视频帧率：{diagnostic.FrameRate?.ToString("0.###") ?? "未知"}\n"
+            + $"视频缓冲：{diagnostic.VideoBufferedDuration?.TotalMilliseconds.ToString("0") ?? "未知"} ms\n"
+            + $"音频设备：{diagnostic.AudioOutputDeviceState ?? "未创建"}\n"
+            + $"当前倍速：{diagnostic.AppliedRate:0.###}，{(diagnostic.IsSpeedChangePending ? "等待应用" : "无待应用请求")}\n"
             + $"允许倍速：{diagnostic.MinRate}～{diagnostic.MaxRate}\n"
             + $"最近换速请求：编号={diagnostic.RateRequestId}，目标={diagnostic.RequestedRate:0.###}，结果={diagnostic.RateChangeState}\n"
-            + $"最近换速错误：{diagnostic.LastRateError ?? "-"}\n"
-            + $"工作状态：{diagnostic.WorkerRunning}，退出={diagnostic.WorkerExitReason ?? "-"}";
+            + $"最近换速错误：{diagnostic.LastRateError ?? "-"}";
     }
 }

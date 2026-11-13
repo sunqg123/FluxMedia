@@ -26,11 +26,6 @@ internal interface IAudioOutputDevice : IDisposable
     AudioOutputState State { get; }
 
     /// <summary>
-    /// 获取当前运行状态和诊断信息。
-    /// </summary>
-    AudioOutputDiagnosticInfo GetDiagnosticInfo();
-
-    /// <summary>
     /// 按采样率和声道数初始化 PCM 音频输出。
     /// </summary>
     void Initialize(int sampleRate, int channels);

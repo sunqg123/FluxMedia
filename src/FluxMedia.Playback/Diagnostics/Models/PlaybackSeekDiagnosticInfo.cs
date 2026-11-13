@@ -26,12 +26,7 @@ public sealed record PlaybackSeekDiagnosticInfo
     public string? Path { get; init; }
 
     /// <summary>
-    /// 策略。
-    /// </summary>
-    public string? Strategy { get; init; }
-
-    /// <summary>
-    /// 是否内进度。
+    /// 是否正在执行定位。
     /// </summary>
     public bool InProgress { get; init; }
 
@@ -46,11 +41,6 @@ public sealed record PlaybackSeekDiagnosticInfo
     public TimeSpan? NextCoalesceDelay { get; init; }
 
     /// <summary>
-    /// 合并耗时。
-    /// </summary>
-    public TimeSpan? CoalesceElapsed { get; init; }
-
-    /// <summary>
     /// 解复用器跳转耗时。
     /// </summary>
     public TimeSpan? DemuxerSeekElapsed { get; init; }
@@ -61,7 +51,7 @@ public sealed record PlaybackSeekDiagnosticInfo
     public TimeSpan? TotalElapsed { get; init; }
 
     /// <summary>
-    /// 界面首帧耗时。
+    /// 跳转后核心首次帧回调耗时，不代表屏幕呈现。
     /// </summary>
     public TimeSpan? FirstUiFrameElapsed { get; init; }
 
@@ -71,32 +61,9 @@ public sealed record PlaybackSeekDiagnosticInfo
     public bool FirstUiRecoveryAttempted { get; init; }
 
     /// <summary>
-    /// 恢复原因。
-    /// </summary>
-    public string? RecoveryReason { get; init; }
-
-    /// <summary>
     /// 已启动时刻。
     /// </summary>
     public DateTimeOffset? StartedAt { get; init; }
 
-    /// <summary>
-    /// 已完成时刻。
-    /// </summary>
-    public DateTimeOffset? CompletedAt { get; init; }
 
-    /// <summary>
-    /// 重新同步版本。
-    /// </summary>
-    public long? ResyncVersion { get; init; }
-
-    /// <summary>
-    /// 最近错误。
-    /// </summary>
-    public string? LastError { get; init; }
-
-    /// <summary>
-    /// 跟踪。
-    /// </summary>
-    public IReadOnlyList<PlaybackSeekTraceEntry> Trace { get; init; } = Array.Empty<PlaybackSeekTraceEntry>();
 }

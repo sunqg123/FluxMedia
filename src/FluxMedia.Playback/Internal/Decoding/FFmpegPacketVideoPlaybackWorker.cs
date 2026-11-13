@@ -2,10 +2,10 @@ using FFmpeg.AutoGen;
 using FluxMedia.Core.Configuration;
 using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
+using FluxMedia.FFmpeg.Extensions;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal.Hardware;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using CorePixelFormat = FluxMedia.Core.Models.PixelFormat;
 
@@ -40,31 +40,6 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
     /// 配置。
     /// </summary>
     private readonly PlaybackOptions _options;
-
-    /// <summary>
-    /// 是否硬件加速请求。
-    /// </summary>
-    private bool _hardwareAccelerationRequested;
-
-    /// <summary>
-    /// 是否已启用硬件加速。
-    /// </summary>
-    private bool _hardwareAccelerationActive;
-
-    /// <summary>
-    /// 视频解码器后端。
-    /// </summary>
-    private string _videoDecoderBackend = "Software";
-
-    /// <summary>
-    /// 视频呈现后端。
-    /// </summary>
-    private string _videoPresentationBackend = "CPU BGRA";
-
-    /// <summary>
-    /// 硬件加速失败原因。
-    /// </summary>
-    private string? _hardwareAccelerationFailureReason;
 
     /// <summary>
     /// 是否已释放资源。
@@ -108,7 +83,6 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
     {
         _disposed = true;
         _producerEpoch.Invalidate();
-        FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoWorkerDispose SourceKind={_context.Source.Kind} Url={_context.Source.Uri}");
     }
 
     /// <summary>
@@ -116,22 +90,8 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
     /// </summary>
     private void DecodeLoop(CancellationToken cancellationToken)
     {
-        var workerStartedAt = DateTimeOffset.UtcNow;
         var timingMode = _context.TimingMode;
-        var firstFrameLogged = false;
-        TimeSpan? firstDecodedFrameElapsed = null;
-        var readPackets = 0L;
-        var decodedFrames = 0L;
-        var pushedFrames = 0L;
-        var droppedVideoFrames = 0L;
-        var bufferingDecisionCount = 0L;
-        TimeSpan? lastVideoAudioDistance = null;
-        TimeSpan? lastAudioClock = null;
-        TimeSpan? lastVideoBufferedDuration = null;
-        var lowLatencyCatchUpActive = false;
-        var lastFrameAt = DateTimeOffset.MinValue;
-        var exitReason = "Completed";
-        string? lastError = null;
+        var failed = false;
 
         AVCodecContext* codecContext = null;
         AVFrame* frame = null;
@@ -148,55 +108,12 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                 throw new InvalidOperationException("No FFmpeg video decoder is available for the selected stream.");
             }
 
-            codecContext = ffmpeg.avcodec_alloc_context3(codec);
-            if (codecContext == null)
-            {
-                throw new InvalidOperationException("FFmpeg video codec context allocation failed.");
-            }
+            codecContext = AllocateCodecContext(codec);
 
             FFmpegErrorHelper.ThrowIfError(ffmpeg.avcodec_parameters_to_context(codecContext, _input.Stream.CodecParameters), "avcodec_parameters_to_context");
-            var capabilities = _callbacks.VideoCapabilities();
-            _hardwareAccelerationRequested = _options.VideoAcceleration != VideoAccelerationMode.Disabled;
-            string? d3d11Error = null;
-            string? vaapiError = null;
-            var hardwareInitStartedAt = Stopwatch.GetTimestamp();
-            if (_options.VideoAcceleration != VideoAccelerationMode.Disabled && capabilities.SupportsD3D11SharedTexture && D3D11HardwareVideoContext.TryCreate(codec, capabilities.AdapterLuid, _context.InstanceId, out d3d11Hardware, out d3d11Error))
-            {
-                d3d11Hardware!.ConfigureCodec(codecContext);
-                _hardwareAccelerationActive = true;
-                _videoDecoderBackend = "D3D11VA";
-                _videoPresentationBackend = "D3D11 shared BGRA texture";
-            }
-            else if (_options.VideoAcceleration != VideoAccelerationMode.Disabled && RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && VaapiHardwareVideoContext.TryCreate(codec, _context.InstanceId, out vaapiHardware, out vaapiError))
-            {
-                vaapiHardware!.ConfigureCodec(codecContext);
-                _hardwareAccelerationActive = true;
-                _videoDecoderBackend = "VAAPI";
-                _videoPresentationBackend = "CPU BGRA (VAAPI download)";
-                _hardwareAccelerationFailureReason = capabilities.SupportsVulkanOpaqueFileDescriptor
-                    ? "The VAAPI DMA-BUF to Vulkan opaque-FD bridge is not available; using CPU presentation."
-                    : "The active Avalonia backend cannot import Vulkan opaque file descriptors; using CPU presentation.";
-            }
-            else if (_options.VideoAcceleration == VideoAccelerationMode.RequireHardware)
-            {
-                throw new InvalidOperationException(d3d11Error ?? vaapiError ?? "No compatible hardware video output was configured.");
-            }
-            else if (_hardwareAccelerationRequested)
-            {
-                _hardwareAccelerationFailureReason = d3d11Error ?? vaapiError ?? "The active video output cannot import D3D11 shared textures.";
-            }
+            ConfigureHardwareDecoder(codec, codecContext, out d3d11Hardware, out vaapiHardware);
 
-            var hardwareInitElapsed = PlaybackClock.ElapsedSince(hardwareInitStartedAt);
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoHardwareInitCompleted SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Requested={_hardwareAccelerationRequested} Active={_hardwareAccelerationActive} DecoderBackend={_videoDecoderBackend} PresentationBackend={_videoPresentationBackend} Failure={_hardwareAccelerationFailureReason ?? "-"} ElapsedMs={hardwareInitElapsed.TotalMilliseconds:0}");
-
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoCodecOpenStart SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Decoder={ffmpeg.avcodec_get_name(_input.Stream.CodecParameters->codec_id)} Backend={_videoDecoderBackend}");
-            var codecOpenStartedAt = Stopwatch.GetTimestamp();
             var codecOpenResult = ffmpeg.avcodec_open2(codecContext, codec, null);
-            var codecOpenElapsed = PlaybackClock.ElapsedSince(codecOpenStartedAt);
-            FluxMediaLog.Write(
-                codecOpenResult < 0 ? LogLevel.Warning : LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoCodecOpenCompleted SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Backend={_videoDecoderBackend} Result={codecOpenResult} Error={FormatError(codecOpenResult) ?? "-"} ElapsedMs={codecOpenElapsed.TotalMilliseconds:0}");
             if (codecOpenResult < 0 && (d3d11Hardware is not null || vaapiHardware is not null) && _options.VideoAcceleration == VideoAccelerationMode.Auto)
             {
                 var failedBackend = d3d11Hardware is not null ? "D3D11VA" : "VAAPI";
@@ -206,26 +123,12 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                 d3d11Hardware = null;
                 vaapiHardware?.Dispose();
                 vaapiHardware = null;
-                _hardwareAccelerationActive = false;
-                _videoDecoderBackend = "Software";
-                _videoPresentationBackend = "CPU BGRA";
-                _hardwareAccelerationFailureReason = $"{failedBackend} decoder open failed: {FFmpegErrorHelper.GetErrorMessage(codecOpenResult)}";
                 ffmpeg.avcodec_free_context(&codecContext);
-                codecContext = ffmpeg.avcodec_alloc_context3(codec);
-                if (codecContext == null)
-                {
-                    throw new InvalidOperationException("FFmpeg video codec context allocation failed during hardware fallback.");
-                }
+                codecContext = AllocateCodecContext(codec, softwareFallback: true);
 
                 FFmpegErrorHelper.ThrowIfError(
                     ffmpeg.avcodec_parameters_to_context(codecContext, _input.Stream.CodecParameters), "avcodec_parameters_to_context");
-                FluxMediaLog.Write(
-                    LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoCodecOpenStart SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Decoder={ffmpeg.avcodec_get_name(_input.Stream.CodecParameters->codec_id)} Backend={_videoDecoderBackend}");
-                codecOpenStartedAt = Stopwatch.GetTimestamp();
                 codecOpenResult = ffmpeg.avcodec_open2(codecContext, codec, null);
-                codecOpenElapsed = PlaybackClock.ElapsedSince(codecOpenStartedAt);
-                FluxMediaLog.Write(
-                    codecOpenResult < 0 ? LogLevel.Warning : LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoCodecOpenCompleted SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Backend={_videoDecoderBackend} Result={codecOpenResult} Error={FormatError(codecOpenResult) ?? "-"} ElapsedMs={codecOpenElapsed.TotalMilliseconds:0}");
             }
 
             FFmpegErrorHelper.ThrowIfError(codecOpenResult, "avcodec_open2");
@@ -247,15 +150,10 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             _frameEpoch = initialResync.FrameEpoch;
             var initialPosition = initialResync.Version > 0 ? initialResync.Position : _context.StartPosition;
             TimeSpan? prerollDropUntil = initialPosition > TimeSpan.Zero ? initialPosition : null;
-            var scheduler = new PlaybackScheduler(timingMode, _context.PlaybackRate, () => _disposed || _context.Resync().Version != lastResyncVersion, _callbacks.AudioDiagnostics, _callbacks.BufferedDuration, _callbacks.BufferedPacketCount, minBufferDuration: _context.Source.Kind == MediaSourceKind.File ? TimeSpan.Zero : TimeSpan.FromMilliseconds(500), maxLowLatencyDelay: _options.Network.MaxNetworkFrameDelay);
+            var scheduler = new PlaybackScheduler(timingMode, _context.PlaybackRate, () => _disposed || _context.Resync().Version != lastResyncVersion, _callbacks.AudioClock, _callbacks.BufferedDuration, _callbacks.BufferedPacketCount, minBufferDuration: _context.Source.Kind == MediaSourceKind.File ? TimeSpan.Zero : TimeSpan.FromMilliseconds(500), maxLowLatencyDelay: _options.Network.MaxNetworkFrameDelay);
             var lastTimestamp = TimeSpan.Zero;
-            var lastStatsAt = DateTimeOffset.UtcNow;
             if (initialPosition > TimeSpan.Zero) scheduler.Reset();
-            var loggedPacketGeneration = -1L;
             var wasPaused = false;
-
-            ReportDiagnostics(running: true, frameRate: frameRate);
-            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoWorkerStart SourceKind={_context.Source.Kind} Url={_context.Source.Uri} StreamIndex={_input.Stream.StreamIndex} Decoder={ffmpeg.avcodec_get_name(_input.Stream.CodecParameters->codec_id)} FrameRate={frameRate:0.###}");
 
             foreach (var packetLease in FFmpegPacketReader.ReadWithDrain(_input.Packets, () => _disposed, cancellationToken))
             {
@@ -283,19 +181,11 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                     // 同步后只丢弃旧位置的包，保留新位置已经读到的关键包。
                     if (packetLease is not null && packetLease.Generation != _input.PacketGeneration())
                     {
-                        FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId,
-                            $"Event=SeekPacketDiscarded Kind=Video PacketGeneration={packetLease.Generation} CurrentGeneration={_input.PacketGeneration()}");
                         continue;
                     }
 
                     if (packetLease is not null)
                     {
-                        if (loggedPacketGeneration != packetLease.Generation)
-                        {
-                            loggedPacketGeneration = packetLease.Generation;
-                            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=SeekFirstVideoPacket Generation={packetLease.Generation} Key={(packetLease.Packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0} Pts={packetLease.Packet->pts}");
-                        }
-                        readPackets++;
                         _callbacks.PacketConsumed?.Invoke((nint)packetLease.Packet);
                     }
                     // 空包通知解码器输出 B 帧等延迟帧。
@@ -314,16 +204,12 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         }
 
                         FFmpegErrorHelper.ThrowIfError(receive, "avcodec_receive_frame");
-                        firstDecodedFrameElapsed ??= DateTimeOffset.UtcNow - workerStartedAt;
                         var timestamp = TimestampFromFrame(frame, _input.Stream.TimeBase, _input.Stream.StartTime, sequence, fallbackFrameInterval, lastTimestamp);
                         lastTimestamp = timestamp;
-                        decodedFrames++;
                         if (ShouldDropPrerollFrame(timestamp, ref prerollDropUntil))
                         {
-                            droppedVideoFrames++;
                             sequence++;
                             ffmpeg.av_frame_unref(frame);
-                            FluxMediaLog.Write(LogLevel.Debug, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoPrerollDrop Timestamp={timestamp} Target={prerollDropUntil?.ToString() ?? "-"}");
                             continue;
                         }
 
@@ -339,12 +225,6 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                             }
                             // 播放时钟：先同步呈现时间，再发布视频帧。
                             scheduling = scheduler.ScheduleVideoFrame(timestamp, cancellationToken);
-                            lastVideoBufferedDuration = scheduling.VideoBufferedDuration;
-                            lowLatencyCatchUpActive = scheduling.LowLatencyCatchUp;
-                            if (scheduling.Action == VideoFrameSchedulingAction.Buffer)
-                            {
-                                bufferingDecisionCount++;
-                            }
                             if (scheduling.Action is not VideoFrameSchedulingAction.Buffer and not VideoFrameSchedulingAction.Wait)
                             {
                                 break;
@@ -358,19 +238,10 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         {
                             break;
                         }
-
-                        lastVideoAudioDistance = scheduling.DistanceToAudio;
-                        lastAudioClock = scheduling.AudioClock;
                         if (scheduling.Action == VideoFrameSchedulingAction.Drop)
                         {
-                            droppedVideoFrames++;
                             sequence++;
                             ffmpeg.av_frame_unref(frame);
-                            if (DateTimeOffset.UtcNow - lastStatsAt >= TimeSpan.FromSeconds(1))
-                            {
-                                lastStatsAt = DateTimeOffset.UtcNow;
-                                ReportDiagnostics(running: true, frameRate: frameRate);
-                            }
                             continue;
                         }
 
@@ -381,198 +252,209 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         var isVaapiFrame = vaapiHardware?.IsHardwareFrame(frame) == true;
                         if ((isD3D11Frame && !_callbacks.VideoCapabilities().SupportsD3D11SharedTexture) || isVaapiFrame)
                         {
-                            if (softwareFrame == null)
-                            {
-                                softwareFrame = ffmpeg.av_frame_alloc();
-                            }
-                            if (softwareFrame == null)
-                            {
-                                throw new InvalidOperationException("FFmpeg failed to allocate a hardware-frame download target.");
-                            }
-
-                            ffmpeg.av_frame_unref(softwareFrame);
-                            FFmpegErrorHelper.ThrowIfError(ffmpeg.av_hwframe_transfer_data(softwareFrame, frame, 0), "av_hwframe_transfer_data");
-                            presentationFrame = softwareFrame;
-                            _videoPresentationBackend = isVaapiFrame ? "CPU BGRA (VAAPI download)" : "CPU BGRA (D3D11VA download)";
-                            if (!isVaapiFrame)
-                            {
-                                _hardwareAccelerationFailureReason ??= "GPU presentation was disabled after the decoder started.";
-                            }
+                            presentationFrame = DownloadHardwareFrame(frame, ref softwareFrame);
                         }
 
                         if (d3d11Hardware is not null && presentationFrame == frame && (AVPixelFormat)frame->format == AVPixelFormat.AV_PIX_FMT_D3D11)
                         {
-                            try
+                            frameToPublish = TryConvertD3D11Frame(d3d11Hardware, frame, frameRate, timestamp, publishedSequence);
+                            if (frameToPublish is null)
                             {
-                                frameToPublish = d3d11Hardware.ConvertFrame(frame, new VideoFormat(frame->width, frame->height, frameRate <= 0 ? 25 : frameRate, CorePixelFormat.Nv12), timestamp, publishedSequence);
-                            }
-                            catch (Exception ex) when (_options.VideoAcceleration == VideoAccelerationMode.Auto)
-                            {
-                                _videoPresentationBackend = "CPU BGRA (D3D11VA download)";
-                                _hardwareAccelerationFailureReason = $"D3D11 video processor presentation failed: {ex.Message}";
-                                FluxMediaLog.Write(
-                                    LogLevel.Warning, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=HardwarePresentationFallback Backend=D3D11VA Error={ex.Message}", ex);
-
-                                if (softwareFrame == null)
-                                {
-                                    softwareFrame = ffmpeg.av_frame_alloc();
-                                }
-                                if (softwareFrame == null)
-                                {
-                                    throw new InvalidOperationException(
-                                        "FFmpeg failed to allocate a hardware-frame download target.");
-                                }
-
-                                ffmpeg.av_frame_unref(softwareFrame);
-                                FFmpegErrorHelper.ThrowIfError(
-                                    ffmpeg.av_hwframe_transfer_data(softwareFrame, frame, 0), "av_hwframe_transfer_data");
-                                presentationFrame = softwareFrame;
+                                presentationFrame = DownloadHardwareFrame(frame, ref softwareFrame);
                             }
                         }
 
                         if (frameToPublish is null)
                         {
                             EnsureScaleContext(presentationFrame, ref width, ref height, ref sourcePixelFormat, ref swsContext);
-                            var destinationStride = checked(width * 4);
-                            var frameLength = checked(height * destinationStride);
-                            var frameOwner = VideoFramePool.Rent(frameLength);
-                            try
-                            {
-                                fixed (byte* target = frameOwner.Memory.Span)
-                                {
-                                    byte_ptrArray4 destinationData = default;
-                                    int_array4 destinationLinesize = default;
-                                    destinationData[0] = target;
-                                    destinationLinesize[0] = destinationStride;
-                                    var scaledRows = ffmpeg.sws_scale(swsContext, presentationFrame->data, presentationFrame->linesize, 0, height, destinationData, destinationLinesize);
-                                    if (scaledRows != height)
-                                    {
-                                        throw new InvalidOperationException($"Video pixel conversion returned {scaledRows} rows; expected {height}.");
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                                frameOwner.Release();
-                                throw;
-                            }
-
-                            frameToPublish = new VideoFrame(new VideoFormat(width, height, frameRate <= 0 ? 25 : frameRate, CorePixelFormat.Bgra32), frameOwner, frameLength, timestamp, publishedSequence, destinationStride);
-                        }
-                        lastFrameAt = DateTimeOffset.UtcNow;
-
-                        if (!firstFrameLogged)
-                        {
-                            firstFrameLogged = true;
-                            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoFirstFrame SourceKind={_context.Source.Kind} Url={_context.Source.Uri} FirstDecodedFrameElapsed={firstDecodedFrameElapsed.Value.TotalMilliseconds:0}ms Timestamp={timestamp}");
+                            frameToPublish = CreateBgraFrame(presentationFrame, swsContext, width, height, frameRate, timestamp, publishedSequence);
                         }
 
-                        try
-                        {
-                            frameToPublish!.BindEpoch(_frameEpoch, _producerEpoch);
-                            // 视频链路①触发：把当前帧交给帧泵。
-                            _callbacks.FrameReady(frameToPublish);
-                            frameToPublish = null;
-                        }
-                        finally
-                        {
-                            frameToPublish?.Dispose();
-                        }
-
-                        pushedFrames++;
+                        PublishVideoFrame(ref frameToPublish);
                         if (softwareFrame != null)
                         {
                             ffmpeg.av_frame_unref(softwareFrame);
                         }
 
-                        if (DateTimeOffset.UtcNow - lastStatsAt >= TimeSpan.FromSeconds(1) || publishedSequence == 0)
-                        {
-                            lastStatsAt = DateTimeOffset.UtcNow;
-                            ReportDiagnostics(running: true, frameRate: frameRate);
-                        }
                     }
                 }
             }
         }
         catch (OperationCanceledException)
         {
-            exitReason = "Canceled";
         }
         catch (Exception ex)
         {
-            lastError = ex.Message;
-            exitReason = ex.Message;
+            failed = true;
             FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoWorkerFault SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Error={ex.Message}", ex);
-            ReportDiagnostics(running: false);
             throw;
         }
         finally
         {
-            var cleanupErrors = new List<Exception>();
-            if (swsContext != null)
-                ffmpeg.sws_freeContext(swsContext);
-            Release(() => d3d11Hardware?.Dispose());
-            Release(() => vaapiHardware?.Dispose());
-            if (softwareFrame != null)
-                ffmpeg.av_frame_free(&softwareFrame);
-            if (frame != null)
-                ffmpeg.av_frame_free(&frame);
-            if (codecContext != null)
-                ffmpeg.avcodec_free_context(&codecContext);
-            var cleanupFailure = cleanupErrors.Count > 0 ? new AggregateException("视频解码资源释放失败。", cleanupErrors) : null;
-            var throwCleanupFailure = lastError is null && cleanupFailure is not null;
-            if (throwCleanupFailure)
-            {
-                lastError = cleanupFailure!.Message;
-                exitReason = lastError;
-            }
-            FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoWorkerExit SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Reason={exitReason} ReadPackets={readPackets} DecodedFrames={decodedFrames} PushedFrames={pushedFrames}");
-            ReportDiagnostics(running: false);
-            if (throwCleanupFailure) throw cleanupFailure!;
+            var cleanupFailure = ReleaseDecoderResources(codecContext, frame, softwareFrame, swsContext, d3d11Hardware, vaapiHardware);
+            if (!failed && cleanupFailure is not null) throw cleanupFailure;
+        }
 
-            // 硬件上下文释放失败也不跳过其它解码资源。
-            void Release(Action release)
+    }
+
+    /// <summary>
+    /// 分配解码上下文，失败时标明是否正在回退。
+    /// </summary>
+    private static AVCodecContext* AllocateCodecContext(AVCodec* codec, bool softwareFallback = false)
+    {
+        var codecContext = ffmpeg.avcodec_alloc_context3(codec);
+        if (codecContext == null)
+        {
+            throw new InvalidOperationException(softwareFallback
+                ? "FFmpeg video codec context allocation failed during hardware fallback."
+                : "FFmpeg video codec context allocation failed.");
+        }
+
+        return codecContext;
+    }
+
+    /// <summary>
+    /// 选择硬件后端并配置解码上下文。
+    /// </summary>
+    private void ConfigureHardwareDecoder(AVCodec* codec, AVCodecContext* codecContext,
+        out D3D11HardwareVideoContext? d3d11Hardware, out VaapiHardwareVideoContext? vaapiHardware)
+    {
+        d3d11Hardware = null;
+        vaapiHardware = null;
+        var capabilities = _callbacks.VideoCapabilities();
+        string? d3d11Error = null;
+        string? vaapiError = null;
+        if (_options.VideoAcceleration != VideoAccelerationMode.Disabled && capabilities.SupportsD3D11SharedTexture && D3D11HardwareVideoContext.TryCreate(codec, capabilities.AdapterLuid, _context.InstanceId, out d3d11Hardware, out d3d11Error))
+        {
+            d3d11Hardware!.ConfigureCodec(codecContext);
+        }
+        else if (_options.VideoAcceleration != VideoAccelerationMode.Disabled && RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && VaapiHardwareVideoContext.TryCreate(codec, _context.InstanceId, out vaapiHardware, out vaapiError))
+        {
+            vaapiHardware!.ConfigureCodec(codecContext);
+        }
+        else if (_options.VideoAcceleration == VideoAccelerationMode.RequireHardware)
+        {
+            throw new InvalidOperationException(d3d11Error ?? vaapiError ?? "No compatible hardware video output was configured.");
+        }
+    }
+
+    /// <summary>
+    /// 复用下载目标，将硬件帧复制到系统内存。
+    /// </summary>
+    private static AVFrame* DownloadHardwareFrame(AVFrame* frame, ref AVFrame* softwareFrame)
+    {
+        if (softwareFrame == null)
+        {
+            softwareFrame = ffmpeg.av_frame_alloc();
+        }
+        if (softwareFrame == null)
+        {
+            throw new InvalidOperationException("FFmpeg failed to allocate a hardware-frame download target.");
+        }
+
+        ffmpeg.av_frame_unref(softwareFrame);
+        FFmpegErrorHelper.ThrowIfError(ffmpeg.av_hwframe_transfer_data(softwareFrame, frame, 0), "av_hwframe_transfer_data");
+        return softwareFrame;
+    }
+
+    /// <summary>
+    /// 尝试创建共享纹理帧，自动模式失败时交回 CPU 路径。
+    /// </summary>
+    private VideoFrame? TryConvertD3D11Frame(D3D11HardwareVideoContext d3d11Hardware, AVFrame* frame,
+        double frameRate, TimeSpan timestamp, long publishedSequence)
+    {
+        try
+        {
+            return d3d11Hardware.ConvertFrame(frame, new VideoFormat(frame->width, frame->height, frameRate <= 0 ? 25 : frameRate, CorePixelFormat.Nv12), timestamp, publishedSequence);
+        }
+        catch (Exception ex) when (_options.VideoAcceleration == VideoAccelerationMode.Auto)
+        {
+            FluxMediaLog.Write(
+                LogLevel.Warning, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=HardwarePresentationFallback Backend=D3D11VA Error={ex.Message}", ex);
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 转换为 BGRA 帧，转换失败时归还缓冲。
+    /// </summary>
+    private static VideoFrame CreateBgraFrame(AVFrame* presentationFrame, SwsContext* swsContext,
+        int width, int height, double frameRate, TimeSpan timestamp, long publishedSequence)
+    {
+        var destinationStride = checked(width * 4);
+        var frameLength = checked(height * destinationStride);
+        var frameOwner = VideoFramePool.Rent(frameLength);
+        try
+        {
+            fixed (byte* target = frameOwner.Memory.Span)
             {
-                try { release(); }
-                catch (Exception exception)
+                byte_ptrArray4 destinationData = default;
+                int_array4 destinationLinesize = default;
+                destinationData[0] = target;
+                destinationLinesize[0] = destinationStride;
+                var scaledRows = ffmpeg.sws_scale(swsContext, presentationFrame->data, presentationFrame->linesize, 0, height, destinationData, destinationLinesize);
+                if (scaledRows != height)
                 {
-                    cleanupErrors.Add(exception);
-                    FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, "Event=VideoCleanupFailed", exception);
+                    throw new InvalidOperationException($"Video pixel conversion returned {scaledRows} rows; expected {height}.");
                 }
             }
         }
-
-        // 从本次运行统计生成诊断快照。
-        void ReportDiagnostics(bool running, double? frameRate = null)
+        catch
         {
-            _callbacks.Diagnostics.Invoke(new PlaybackWorkerDiagnostics
+            frameOwner.Release();
+            throw;
+        }
+
+        return new VideoFrame(new VideoFormat(width, height, frameRate <= 0 ? 25 : frameRate, CorePixelFormat.Bgra32), frameOwner, frameLength, timestamp, publishedSequence, destinationStride);
+    }
+
+    /// <summary>
+    /// 交付后移交帧所有权，交付失败时释放。
+    /// </summary>
+    private void PublishVideoFrame(ref VideoFrame? frameToPublish)
+    {
+        try
+        {
+            frameToPublish!.BindEpoch(_frameEpoch, _producerEpoch);
+            // 视频链路①触发：把当前帧交给帧泵。
+            _callbacks.FrameReady(frameToPublish);
+            frameToPublish = null;
+        }
+        finally
+        {
+            frameToPublish?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 按原有顺序释放资源，汇总硬件上下文清理错误。
+    /// </summary>
+    private AggregateException? ReleaseDecoderResources(AVCodecContext* codecContext, AVFrame* frame,
+        AVFrame* softwareFrame, SwsContext* swsContext, D3D11HardwareVideoContext? d3d11Hardware, VaapiHardwareVideoContext? vaapiHardware)
+    {
+        var cleanupErrors = new List<Exception>();
+        if (swsContext != null)
+            ffmpeg.sws_freeContext(swsContext);
+        Release(() => d3d11Hardware?.Dispose());
+        Release(() => vaapiHardware?.Dispose());
+        if (softwareFrame != null)
+            ffmpeg.av_frame_free(&softwareFrame);
+        if (frame != null)
+            ffmpeg.av_frame_free(&frame);
+        if (codecContext != null)
+            ffmpeg.avcodec_free_context(&codecContext);
+        return cleanupErrors.Count > 0 ? new AggregateException("视频解码资源释放失败。", cleanupErrors) : null;
+
+        // 硬件上下文释放失败也不跳过其它解码资源。
+        void Release(Action release)
+        {
+            try { release(); }
+            catch (Exception exception)
             {
-                SourceKind = _context.Source.Kind,
-                SourceUrl = _context.Source.Uri,
-                FirstDecodedFrameElapsed = firstDecodedFrameElapsed,
-                Protocol = MediaSourcePolicy.GetProtocol(_context.Source),
-                FrameRate = frameRate,
-                TimingMode = timingMode,
-                LowLatencyEnabled = timingMode == PlaybackTimingMode.RealtimeLowLatency,
-                ReadPacketCount = readPackets,
-                DecodedFrameCount = decodedFrames,
-                PushedFrameCount = pushedFrames,
-                DroppedVideoFrameCount = droppedVideoFrames,
-                BufferingDecisionCount = bufferingDecisionCount,
-                LastVideoBufferedDuration = lastVideoBufferedDuration,
-                LowLatencyCatchUpActive = lowLatencyCatchUpActive,
-                LastVideoAudioDistance = lastVideoAudioDistance,
-                LastAudioClock = lastAudioClock,
-                LastFrameAt = lastFrameAt == DateTimeOffset.MinValue ? null : lastFrameAt,
-                WorkerRunning = running,
-                ExitReason = running ? null : exitReason,
-                LastFFmpegError = lastError,
-                HardwareAccelerationRequested = _hardwareAccelerationRequested,
-                HardwareAccelerationActive = _hardwareAccelerationActive,
-                VideoDecoderBackend = _videoDecoderBackend,
-                VideoPresentationBackend = _videoPresentationBackend,
-                HardwareAccelerationFailureReason = _hardwareAccelerationFailureReason
-            });
+                cleanupErrors.Add(exception);
+                FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, "Event=VideoCleanupFailed", exception);
+            }
         }
     }
 
@@ -596,12 +478,9 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
         }
 
         scheduler.Reset();
-        FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId,
-            $"Event=SeekFrameScheduling Version={request.Version} Policy=ImmediateFirstFrame");
         sequence = 0;
         lastTimestamp = request.Position;
         prerollDropUntil = request.Position;
-        FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoDecoderResync Version={request.Version} Position={request.Position}");
         return true;
     }
 
@@ -630,15 +509,9 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
     /// </summary>
     private static TimeSpan TimestampFromFrame(AVFrame* frame, AVRational timeBase, TimeSpan timestampOrigin, long sequence, TimeSpan fallbackFrameInterval, TimeSpan lastTimestamp)
     {
-        var pts = frame->best_effort_timestamp;
-        if (pts >= 0)
+        if (timeBase.TryGetMediaTime(frame->best_effort_timestamp, timestampOrigin, out var timestamp))
         {
-            var seconds = pts * ffmpeg.av_q2d(timeBase);
-            if (!double.IsNaN(seconds) && !double.IsInfinity(seconds) && seconds >= 0)
-            {
-                var timestamp = TimeSpan.FromSeconds(seconds) - timestampOrigin;
-                return timestamp < TimeSpan.Zero ? TimeSpan.Zero : timestamp;
-            }
+            return timestamp;
         }
 
         return sequence == 0 ? TimeSpan.Zero : lastTimestamp + fallbackFrameInterval;
@@ -677,9 +550,4 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             throw new InvalidOperationException("Video pixel format conversion context creation failed.");
         }
     }
-
-    /// <summary>
-    /// 将原生错误码转换为可读信息。
-    /// </summary>
-    private static string? FormatError(int code) => code < 0 ? FFmpegErrorHelper.GetErrorMessage(code) : null;
 }

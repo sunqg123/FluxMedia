@@ -14,7 +14,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     private readonly Channel<FFmpegPacketLease> _channel;
 
     /// <summary>
-    /// 出队时同步更新统计的数据包读取器。
+    /// 出队时同步更新缓冲水位的读取器。
     /// </summary>
     private readonly ChannelReader<FFmpegPacketLease> _reader;
 
@@ -108,21 +108,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     public ChannelReader<FFmpegPacketLease> Reader => _reader;
 
     /// <summary>
-    /// 因缓冲策略丢弃的数据包总数。
-    /// </summary>
-    public long DroppedPackets => Interlocked.Read(ref _droppedPackets);
-
-    /// <summary>
-    /// 跳转时主动清理的数据包数。
-    /// </summary>
-    public long SeekDiscardedPackets => Interlocked.Read(ref _seekDiscardedPackets);
-
-    /// <summary>
-    /// 停止后未消费的数据包数。
-    /// </summary>
-    public long StopDiscardedPackets => Interlocked.Read(ref _stopDiscardedPackets);
-
-    /// <summary>
     /// 当前处理到的媒体时间。
     /// </summary>
     public TimeSpan CurrentTime
@@ -151,52 +136,9 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     }
 
     /// <summary>
-    /// 当前缓冲区首个包的时间戳。
-    /// </summary>
-    public TimeSpan? FirstTimestamp
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _firstTimestamp;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 当前缓冲区末个包的时间戳。
-    /// </summary>
-    public TimeSpan? LastTimestamp
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _lastTimestamp;
-            }
-        }
-    }
-
-    /// <summary>
     /// 当前缓存的数据包数量。
     /// </summary>
     public int Count => Volatile.Read(ref _queuedPacketCount);
-
-    /// <summary>
-    /// 已丢弃数据包。
-    /// </summary>
-    private long _droppedPackets;
-
-    /// <summary>
-    /// 因跳转失效的数据包数。
-    /// </summary>
-    private long _seekDiscardedPackets;
-
-    /// <summary>
-    /// 停止时归还的数据包数。
-    /// </summary>
-    private long _stopDiscardedPackets;
 
     /// <summary>
     /// 设置数据包时间基、默认时长和时间起点。
@@ -224,7 +166,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
             ThrowIfDisposed();
             if (_completed)
             {
-                Discard(packet, forSeek: false);
+                packet.Dispose();
                 return false;
             }
             var keyPacket = (packet.Packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0;
@@ -235,13 +177,11 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
                     DropBufferedPackets();
                     _waitingForKeyPacket = true;
                     packet.Dispose();
-                    Interlocked.Increment(ref _droppedPackets);
                     return false;
                 }
                 if (_waitingForKeyPacket && !keyPacket)
                 {
                     packet.Dispose();
-                    Interlocked.Increment(ref _droppedPackets);
                     return false;
                 }
                 _waitingForKeyPacket = false;
@@ -261,14 +201,12 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
                     return true;
                 }
                 packet.Dispose();
-                Interlocked.Increment(ref _droppedPackets);
                 return false;
             }
             if (_channel.Reader.TryRead(out var stale))
             {
                 OnPacketDequeued(stale);
                 stale.Dispose();
-                Interlocked.Increment(ref _droppedPackets);
                 if (_channel.Writer.TryWrite(packet))
                 {
                     OnPacketEnqueued(packet);
@@ -276,7 +214,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
                 }
             }
             packet.Dispose();
-            Interlocked.Increment(ref _droppedPackets);
             return false;
         }
     }
@@ -296,7 +233,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     }
 
     /// <summary>
-    /// 跳转时清空旧包，不计入缓冲策略丢包。
+    /// 跳转时归还旧包并重置缓冲时序。
     /// </summary>
     public void Clear()
     {
@@ -307,21 +244,11 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
             while (_channel.Reader.TryRead(out var packet))
             {
                 OnPacketDequeued(packet);
-                Discard(packet, forSeek: true);
+                packet.Dispose();
             }
 
             ResetTimestamps();
         }
-    }
-
-    /// <summary>
-    /// 归还因跳转或停止而失效的数据包。
-    /// </summary>
-    public void Discard(FFmpegPacketLease packet, bool forSeek)
-    {
-        packet.Dispose();
-        if (forSeek) Interlocked.Increment(ref _seekDiscardedPackets);
-        else Interlocked.Increment(ref _stopDiscardedPackets);
     }
 
     /// <summary>
@@ -332,7 +259,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
         while (_channel.Reader.TryRead(out var packet))
         {
             packet.Dispose();
-            Interlocked.Increment(ref _droppedPackets);
         }
         ResetTimestamps();
     }
@@ -361,7 +287,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
             _channel.Writer.TryComplete();
             while (_channel.Reader.TryRead(out var packet))
             {
-                Discard(packet, forSeek: false);
+                packet.Dispose();
             }
             ResetTimestamps();
         }
@@ -391,7 +317,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     }
 
     /// <summary>
-    /// 更新出队后的包数和时间统计。
+    /// 更新出队后的包数和缓冲时序。
     /// </summary>
     private void OnPacketDequeued(FFmpegPacketLease packet)
     {

@@ -18,15 +18,12 @@ Avalonia 控制栏将进度条与 `PlayerBinding.PositionSeconds` 双向绑定�
 也可以调用 `SeekAsync` 或 `SeekByAsync`，两者都经过核心权限检查。
 连续请求会合并待执行目标；长 GOP、解码预滚和管线重建会影响响应时间。
 
-## 诊断
+## 执行与诊断边界
 
-启用日志后，可使用以下事件排查定位与显示问题：
+核心使用类型化执行路径决定原地定位、重建或首帧恢复，不读取诊断字符串。
+自适应合并保留正常控制需要的定位耗时、首帧等待时间、合并数量和整体耗时。
+首帧仍由 PlaybackSeekFrame 与帧代次确认，移除诊断不会改变首帧等待与恢复逻辑。
 
-- `MediaSeekPermission`：媒体时长与 Seek 权限。
-- `SeekBindingSubmitted` / `SeekTrace`：目标提交、合并、定位与首帧。
-- `SeekRejected`：不可定位媒体的请求拒绝。
-- `SeekPacketGeneration` / `SeekFirstVideoPacket`：数据包代次和首包信息。
-- `VideoTimelinePresented`：当前时间线的首次 Avalonia 显示提交。
-
-`FirstUI` 表示核心视频帧回调，显示提交也不等于物理屏幕扫描时刻。
-日志配置见 [日志说明](logging.md)。
+诊断仅投影当前仍存在的执行状态和首帧任务，不保留 SeekTrace 环形队列、历史阶段日志或首帧历史。
+无法读取的字段为 null；核心首帧回调不代表 Avalonia 已提交合成，更不代表屏幕呈现。
+详见 [诊断边界](diagnostics.md)。

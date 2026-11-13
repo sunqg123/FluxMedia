@@ -9,7 +9,7 @@ namespace FluxMedia.Playback;
 /// <summary>
 /// 串行执行播放命令，公开实际状态和播放事件。
 /// </summary>
-public sealed class Player : IAsyncDisposable
+public sealed partial class Player : IAsyncDisposable
 {
     /// <summary>
     /// 底层播放会话。
@@ -136,14 +136,9 @@ public sealed class Player : IAsyncDisposable
     public bool IsMuted => _session.IsMuted;
 
     /// <summary>
-    /// 当前录制的诊断信息。
-    /// </summary>
-    public PlaybackRecordingDiagnosticInfo Recording => _session.GetRecordingDiagnosticInfo();
-
-    /// <summary>
     /// 当前录制的运行状态。
     /// </summary>
-    public PlaybackRecordingState RecordingState => Recording.State;
+    public PlaybackRecordingState RecordingState => _session.RecordingState;
 
     /// <summary>
     /// 录制是否正在启动或进行中。
@@ -192,6 +187,7 @@ public sealed class Player : IAsyncDisposable
     /// </summary>
     public async ValueTask OpenAsync(string pathOrUrl, PlaybackOptions? options = null, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         var source = MediaSourcePolicy.Parse(pathOrUrl);
         await OpenAsync(source, options, cancellationToken).ConfigureAwait(false);
     }
@@ -199,25 +195,18 @@ public sealed class Player : IAsyncDisposable
     /// <summary>
     /// 打开媒体源并读取媒体信息。
     /// </summary>
-    public async ValueTask OpenAsync(MediaSource source, PlaybackOptions? options = null, CancellationToken cancellationToken = default)
-    {
-        await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+    public ValueTask OpenAsync(MediaSource source, PlaybackOptions? options = null, CancellationToken cancellationToken = default) => ExecuteCommandAsync(async token =>
         {
-            await _session.OpenAsync(new PlaybackOpenRequest(source, options), cancellationToken).ConfigureAwait(false);
+            await _session.OpenAsync(new PlaybackOpenRequest(source, options), token).ConfigureAwait(false);
             NotifyPlaybackChanged();
-        }
-        finally
-        {
-            _commandGate.Release();
-        }
-    }
+        }, cancellationToken);
 
     /// <summary>
     /// 打开本地路径或网络地址并立即开始播放。
     /// </summary>
     public async ValueTask<PlaybackResult> OpenAndPlayAsync(string pathOrUrl, PlaybackOptions? options = null, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         var source = MediaSourcePolicy.Parse(pathOrUrl);
         return await OpenAndPlayAsync(source, options, cancellationToken).ConfigureAwait(false);
     }
@@ -225,26 +214,21 @@ public sealed class Player : IAsyncDisposable
     /// <summary>
     /// 打开媒体源并开始播放。
     /// </summary>
-    public async ValueTask<PlaybackResult> OpenAndPlayAsync(MediaSource source, PlaybackOptions? options = null, CancellationToken cancellationToken = default)
-    {
-        await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+    public ValueTask<PlaybackResult> OpenAndPlayAsync(MediaSource source, PlaybackOptions? options = null, CancellationToken cancellationToken = default) => ExecuteCommandAsync<PlaybackResult>(async token =>
         {
-            await _session.OpenAsync(new PlaybackOpenRequest(source, options), cancellationToken).ConfigureAwait(false);
+            await _session.OpenAsync(new PlaybackOpenRequest(source, options), token).ConfigureAwait(false);
             NotifyPlaybackChanged();
-            return await _session.PlayAsync(cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            _commandGate.Release();
-        }
-    }
+            // 打开期间或通知回调中可能开始释放，不再继续启动播放。
+            ThrowIfDisposed();
+            return await _session.PlayAsync(token).ConfigureAwait(false);
+        }, cancellationToken);
 
     /// <summary>
     /// 打开网络媒体源。
     /// </summary>
     public async ValueTask OpenUrlAsync(string url, PlaybackOptions? options = null, CancellationToken cancellationToken = default)
     {
+        ThrowIfDisposed();
         await OpenAsync(MediaSource.FromNetwork(url), options, cancellationToken).ConfigureAwait(false);
     }
 
@@ -334,54 +318,22 @@ public sealed class Player : IAsyncDisposable
     /// <summary>
     /// 开始录制当前播放的数据包。
     /// </summary>
-    public async ValueTask<PlaybackResult> StartRecordingAsync(PlaybackRecordingOptions options, CancellationToken cancellationToken = default)
-    {
-        await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+    public ValueTask<PlaybackResult> StartRecordingAsync(PlaybackRecordingOptions options, CancellationToken cancellationToken = default) => ExecuteCommandAsync<PlaybackResult>(async token =>
         {
-            var result = await _session.StartRecordingAsync(options, cancellationToken).ConfigureAwait(false);
+            var result = await _session.StartRecordingAsync(options, token).ConfigureAwait(false);
             NotifyPlaybackChanged();
             return result;
-        }
-        finally
-        {
-            _commandGate.Release();
-        }
-    }
+        }, cancellationToken);
 
     /// <summary>
     /// 停止并封装当前录制文件。
     /// </summary>
-    public async ValueTask<PlaybackResult> StopRecordingAsync(CancellationToken cancellationToken = default)
-    {
-        await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+    public ValueTask<PlaybackResult> StopRecordingAsync(CancellationToken cancellationToken = default) => ExecuteCommandAsync<PlaybackResult>(async token =>
         {
-            var result = await _session.StopRecordingAsync(cancellationToken).ConfigureAwait(false);
+            var result = await _session.StopRecordingAsync(token).ConfigureAwait(false);
             NotifyPlaybackChanged();
             return result;
-        }
-        finally
-        {
-            _commandGate.Release();
-        }
-    }
-
-    /// <summary>
-    /// 获取当前运行状态和诊断信息。
-    /// </summary>
-    public PlaybackDiagnosticInfo GetDiagnosticInfo()
-    {
-        return _session.GetDiagnosticInfo();
-    }
-
-    /// <summary>
-    /// 获取当前录制状态、输出文件和最后错误。
-    /// </summary>
-    public PlaybackRecordingDiagnosticInfo GetRecordingDiagnosticInfo()
-    {
-        return _session.GetRecordingDiagnosticInfo();
-    }
+        }, cancellationToken);
 
     /// <summary>
     /// 读取当前媒体信息。
@@ -411,11 +363,32 @@ public sealed class Player : IAsyncDisposable
     /// </summary>
     public ValueTask DisposeAsync()
     {
+        TaskCompletionSource<bool> completion;
         lock (_disposeSync)
         {
-            _disposeTask ??= DisposeCoreAsync();
-            return new ValueTask(_disposeTask);
+            if (_disposeTask is not null)
+                return new ValueTask(_disposeTask);
+            completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposeTask = completion.Task;
+            _disposed = true;
         }
+        // 先登记共享任务，再通知订阅者；重入只会取得同一任务。
+        _ = DisposeAndCompleteAsync(completion);
+        return new ValueTask(completion.Task);
+    }
+
+    /// <summary>
+    /// 将清理结果传给所有释放调用方，保留异常与取消状态。
+    /// </summary>
+    private async Task DisposeAndCompleteAsync(TaskCompletionSource<bool> completion)
+    {
+        try
+        {
+            await DisposeCoreAsync().ConfigureAwait(false);
+            completion.TrySetResult(true);
+        }
+        catch (OperationCanceledException exception) { completion.TrySetCanceled(exception.CancellationToken); }
+        catch (Exception exception) { completion.TrySetException(exception); }
     }
 
     /// <summary>
@@ -423,7 +396,6 @@ public sealed class Player : IAsyncDisposable
     /// </summary>
     private async Task DisposeCoreAsync()
     {
-        _disposed = true;
         NotifyPlaybackChanged();
         _session.CancelPendingOperations();
         try
@@ -498,10 +470,14 @@ public sealed class Player : IAsyncDisposable
     /// </summary>
     private void NotifySubscribers<TEvent>(EventHandler<TEvent>? handlers, TEvent value, string eventName, bool allowDisposed = false)
     {
-        if (handlers is null || _disposed && !allowDisposed) return;
+        if (handlers is null || _disposed && !allowDisposed)
+            return;
         foreach (EventHandler<TEvent> handler in handlers.GetInvocationList())
         {
-            try { handler(this, value); }
+            try
+            {
+                handler(this, value);
+            }
             catch (Exception exception)
             {
                 FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId, $"Event=SubscriberFailed Notification={eventName}", exception);
@@ -516,7 +492,11 @@ public sealed class Player : IAsyncDisposable
     {
         ThrowIfDisposed();
         await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { ThrowIfDisposed(); return await command(cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            ThrowIfDisposed();
+            return await command(cancellationToken).ConfigureAwait(false);
+        }
         finally { _commandGate.Release(); }
     }
     /// <summary>
@@ -526,7 +506,11 @@ public sealed class Player : IAsyncDisposable
     {
         ThrowIfDisposed();
         await _commandGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { ThrowIfDisposed(); await command(cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            ThrowIfDisposed();
+            await command(cancellationToken).ConfigureAwait(false);
+        }
         finally { _commandGate.Release(); }
     }
     /// <summary>
@@ -534,6 +518,7 @@ public sealed class Player : IAsyncDisposable
     /// </summary>
     private void ThrowIfDisposed()
     {
-        if (_disposed) throw new ObjectDisposedException(nameof(Player));
+        if (_disposed)
+            throw new ObjectDisposedException(nameof(Player));
     }
 }

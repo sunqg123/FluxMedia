@@ -4,7 +4,7 @@ using System.Threading.Channels;
 namespace FluxMedia.Playback.Internal;
 
 /// <summary>
-/// 分发公开帧租约并累计显示统计，不管理解码线程。
+/// 分发公开帧租约，不管理解码线程。
 /// </summary>
 internal sealed class PlaybackVideoFrameHub
 {
@@ -17,51 +17,16 @@ internal sealed class PlaybackVideoFrameHub
     /// </summary>
     private Channel<VideoFrameLease>? _output;
     /// <summary>
-    /// 累计发布的帧数。
-    /// </summary>
-    private long _outputFrameCount;
-    /// <summary>
-    /// 管线覆盖或清理的帧数。
-    /// </summary>
-    private long _droppedFrameCount;
-    /// <summary>
-    /// 累计发布帧数。
-    /// </summary>
-    public long OutputFrameCount => Interlocked.Read(ref _outputFrameCount);
-    /// <summary>
-    /// 累计丢弃帧数。
-    /// </summary>
-    public long DroppedFrameCount => Interlocked.Read(ref _droppedFrameCount);
-    /// <summary>
-    /// 帧就绪通知数。
-    /// </summary>
-    public long VideoFrameReadyCount => OutputFrameCount;
-    /// <summary>
-    /// 开始打开新媒体时重置统计。
-    /// </summary>
-    public void ResetCounters()
-    {
-        Interlocked.Exchange(ref _outputFrameCount, 0);
-        Interlocked.Exchange(ref _droppedFrameCount, 0);
-    }
-    /// <summary>
-    /// 记录管线丢弃的帧。
-    /// </summary>
-    public void RecordDrop() => Interlocked.Increment(ref _droppedFrameCount);
-    /// <summary>
     /// 发布帧租约；原始帧仍由帧泵负责释放。
     /// </summary>
-    public async ValueTask PublishAsync(VideoFrame frame, Func<VideoFrame, long, ValueTask> publish)
+    public async ValueTask PublishAsync(VideoFrame frame, Func<VideoFrame, ValueTask> publish)
     {
-        long count;
         lock (_sync)
         {
             if (!frame.IsCurrent)
             {
-                RecordDrop();
                 return;
             }
-            count = Interlocked.Increment(ref _outputFrameCount);
             if (_output is not null)
             {
                 while (_output.Reader.TryRead(out var previous)) previous.Dispose();
@@ -70,8 +35,7 @@ internal sealed class PlaybackVideoFrameHub
             }
         }
         // 视频链路③触发：回到会话 PublishVideoFrameAsync。
-        if (frame.IsCurrent) await publish(frame, count).ConfigureAwait(false);
-        else RecordDrop();
+        if (frame.IsCurrent) await publish(frame).ConfigureAwait(false);
     }
     /// <summary>
     /// 释放公开队列中尚未消费的帧。

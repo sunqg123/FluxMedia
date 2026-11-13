@@ -15,9 +15,9 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
 {
 
     /// <summary>
-    /// 首次界面恢复超时。
+    /// 跳转首帧等待上限。
     /// </summary>
-    private static readonly TimeSpan FirstUiRecoveryTimeout = TimeSpan.FromMilliseconds(1500);
+    private static readonly TimeSpan SeekFirstFrameTimeout = TimeSpan.FromMilliseconds(1500);
 
     /// <summary>
     /// 位置通知间隔。
@@ -84,34 +84,9 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     private PlaybackOptions _currentOptions;
 
     /// <summary>
-    /// 媒体打开和视频工作线程的综合诊断。
-    /// </summary>
-    private PlaybackDiagnosticInfo _diagnostic = new();
-
-    /// <summary>
-    /// 本次打开媒体后的关键生命周期时间点。
-    /// </summary>
-    private PlaybackLifecycleDiagnosticInfo _lifecycleDiagnostic = new();
-
-    /// <summary>
     /// 当前播放是否处于暂停状态。
     /// </summary>
     private volatile bool _isPaused;
-
-    /// <summary>
-    /// 本次播放管线开始运行的时间。
-    /// </summary>
-    private DateTimeOffset? _playStartedAt;
-
-    /// <summary>
-    /// 从播放开始到界面首帧的耗时。
-    /// </summary>
-    private TimeSpan? _firstUiFrameElapsed;
-
-    /// <summary>
-    /// 最近一帧发布到显示端的时间。
-    /// </summary>
-    private DateTimeOffset? _lastUiFrameAt;
 
     /// <summary>
     /// 当前会话的媒体播放位置。
@@ -139,7 +114,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     private bool _isMuted;
 
     /// <summary>
-    /// 跳转首帧显示后是否立即暂停。
+    /// 跳转首帧发布后是否立即暂停。
     /// </summary>
     private bool _pauseAfterSeekFrame;
 
@@ -147,26 +122,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// 跳转结束后是否恢复播放。
     /// </summary>
     private bool _seekResumePlayingIntent;
-
-    /// <summary>
-    /// 根据当前帧输出和同步状态计算的健康诊断。
-    /// </summary>
-    private PlaybackHealthDiagnosticInfo _healthDiagnostic = new();
-
-    /// <summary>
-    /// 上次已记录的健康状态特征，避免重复日志。
-    /// </summary>
-    private string? _lastHealthSignature;
-
-    /// <summary>
-    /// 网络恢复尝试数量。
-    /// </summary>
-    private int _networkRecoveryAttemptCount;
-
-    /// <summary>
-    /// 最近网络错误。
-    /// </summary>
-    private string? _lastNetworkError;
 
     /// <summary>
     /// 当前跳转实际开始执行的时间。
@@ -177,21 +132,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// 当前实际执行中的跳转请求编号。
     /// </summary>
     private long ActiveSeekRequestId => _activeSeek?.RequestId ?? 0;
-
-    /// <summary>
-    /// 最近执行的播放控制操作名称。
-    /// </summary>
-    private string? _lastControlOperation;
-
-    /// <summary>
-    /// 最近一次播放控制操作的失败原因。
-    /// </summary>
-    private string? _lastControlError;
-
-    /// <summary>
-    /// 最近一次上报的音频输出诊断。
-    /// </summary>
-    private AudioPlaybackDiagnostics _audioDiagnostic = new();
 
     /// <summary>
     /// 显示端最新声明的 GPU 输出能力。
@@ -205,6 +145,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     {
         _engineOptions = engineOptions;
         _defaultOptions = defaultOptions ?? new PlaybackOptions();
+        NetworkPlaybackOptions.Validate(_defaultOptions.Network);
+        if (!IsFiniteVolume(_defaultOptions.InitialVolume))
+            throw new ArgumentOutOfRangeException(nameof(PlaybackOptions.InitialVolume), _defaultOptions.InitialVolume,
+                "初始音量必须为有限值，不能为 NaN 或无穷值。");
         _currentOptions = _defaultOptions;
         _rates = new PlaybackRateController(_engineOptions, InstanceId, () => _isPaused);
         _rates.Changed += OnPlaybackRateChanged;
@@ -213,7 +157,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _volume = Math.Clamp(_defaultOptions.InitialVolume, 0, 1);
         _isMuted = _defaultOptions.InitialMuted;
         _videoFrames = new PlaybackVideoFrameHub();
-        _seeking = new PlaybackSeekController(InstanceId, ExecuteQueuedSeekAsync);
+        _seeking = new PlaybackSeekController(ExecuteQueuedSeekAsync);
     }
 
     /// <summary>
@@ -341,7 +285,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             throw new PlaybackException(PlaybackError.OpenFailed, error);
         }
         cancellationToken.ThrowIfCancellationRequested();
-        PlaybackRateController.ValidateOptions(request!.Options ?? _defaultOptions);
+        NetworkPlaybackOptions.Validate((request!.Options ?? _defaultOptions).Network);
+        PlaybackRateController.ValidateOptions(request.Options ?? _defaultOptions);
         _operationCts?.Cancel();
         _rates.Retire(preservePending: false);
         await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -356,38 +301,18 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             CurrentMediaInfo = null;
             _currentOptions = request!.Options ?? _defaultOptions;
             _rates.Reset(_currentOptions);
-            _lifecycleDiagnostic = new PlaybackLifecycleDiagnosticInfo();
-            MarkLifecycle("OpenStarted");
-            _diagnostic = new PlaybackDiagnosticInfo
-            {
-                SourceKind = source.Kind,
-                SourceUrl = source.Uri,
-                FFmpegOpenOptions = PlaybackFFmpegOptions.Describe(source, _currentOptions)
-            };
-            _firstUiFrameElapsed = null;
-            _lastUiFrameAt = null;
             _positionNotifications.Reset();
-            _playStartedAt = null;
             _currentTime = TimeSpan.Zero;
             _workerStartPosition = TimeSpan.Zero;
             _pauseAfterSeekFrame = false;
             _seeking.Reset();
             _resyncSignal.Request(TimeSpan.Zero);
             _activeSeek = null;
-            _lastControlOperation = "Open";
-            _lastControlError = null;
-            _audioDiagnostic = new AudioPlaybackDiagnostics { WorkerState = "未启动" };
-            _networkRecoveryAttemptCount = 0;
-            _lastNetworkError = null;
             _recording.Reset();
-            _videoFrames.ResetCounters();
             _videoFrames.ResetPublicOutput();
-
-            Volatile.Write(ref _retiredReadTimeouts, 0);
-            _retiredDemuxerDiagnostic = null;
             try
             {
-                var timeout = source.Kind == MediaSourceKind.NetworkStream ? PlaybackFFmpegOptions.EffectiveOpenTimeout(_currentOptions) : _currentOptions.OpenTimeout;
+                var timeout = source.Kind == MediaSourceKind.NetworkStream ? _currentOptions.Network.OpenTimeout : _currentOptions.OpenTimeout;
                 using var open = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _operationCts!.Token);
                 open.CancelAfter(timeout);
                 var pipeline = CreatePipeline(TimeSpan.Zero);
@@ -395,11 +320,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 CurrentMediaInfo = pipeline.Demuxer.MediaInfo ?? throw new InvalidOperationException("未读取到媒体信息。");
                 if (!CurrentMediaInfo.HasVideo) throw new InvalidOperationException("当前媒体没有视频流。");
                 ConfigureInitialRate();
-                if (pipeline.Demuxer.OpenDiagnostic is not null) UpdateOpenDiagnostics(pipeline.Demuxer.OpenDiagnostic);
                 await TransitionAsync(PlaybackState.Ready, cancellationToken).ConfigureAwait(false);
-                MarkLifecycle("OpenCompleted");
-                FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId,
-                    $"Event=MediaSeekPermission IsLive={IsLive} CanSeek={CanSeek} Duration={Duration} SourceKind={CurrentSource?.Kind}");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _operationCts?.IsCancellationRequested != false)
             {
@@ -448,7 +369,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _isPaused = false;
         _rates.Wake();
         _pauseAfterSeekFrame = false;
-        MarkLifecycle("PlayRequested");
         if (_pipeline is null || _pipeline.IsCanceled || _pipeline.Completion?.IsCompleted == true)
         {
             var position = State == PlaybackState.Completed ? TimeSpan.Zero : _workerStartPosition;
@@ -461,7 +381,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             StartPipeline(_pipeline);
         }
         else await TransitionAsync(PlaybackState.Playing, cancellationToken).ConfigureAwait(false);
-        MarkLifecycle("PlayStarted");
         return PlaybackResult.Success();
     }
 
@@ -500,11 +419,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
 
         cancellationToken.ThrowIfCancellationRequested();
         _isPaused = true;
-        MarkLifecycle("PauseRequested");
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Pause。State={State}, SourceKind={CurrentSource?.Kind}, Source={CurrentSource?.Uri}");
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=PauseAudio AudioState={_audioDiagnostic.WorkerState} AudioTime={_audioDiagnostic.CurrentTime?.ToString() ?? "-"} DeviceState={_audioDiagnostic.OutputDeviceState ?? "-"}");
         await TransitionAsync(PlaybackState.Paused, cancellationToken).ConfigureAwait(false);
-        MarkLifecycle("Paused");
         return PlaybackResult.Success();
     }
 
@@ -513,8 +428,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// </summary>
     public ValueTask<PlaybackResult> ResumeAsync(CancellationToken cancellationToken = default)
     {
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Resume。State={State}, SourceKind={CurrentSource?.Kind}, Source={CurrentSource?.Uri}");
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=ResumeAudio AudioState={_audioDiagnostic.WorkerState} AudioTime={_audioDiagnostic.CurrentTime?.ToString() ?? "-"} DeviceState={_audioDiagnostic.OutputDeviceState ?? "-"}");
         return PlayAsync(cancellationToken);
     }
 
@@ -558,34 +471,13 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         var startedAt = DateTimeOffset.UtcNow;
         _resyncSignal.InvalidateFrames();
         _videoFrames.ClearPublicOutput();
-        _activeSeek = new PlaybackSeekFrame(_seeking.Diagnostic.RequestId, target, startedAt);
-        _seeking.Diagnostic = _seeking.Diagnostic with
-        {
-            RequestedPosition = target,
-            ActualPosition = null,
-            Path = null,
-            InProgress = true,
-            DemuxerSeekElapsed = null,
-            TotalElapsed = null,
-            FirstUiFrameElapsed = null,
-            FirstUiRecoveryAttempted = false,
-            RecoveryReason = null,
-            StartedAt = startedAt,
-            CompletedAt = null,
-            ResyncVersion = null,
-            LastError = null
-        };
-        _seeking.Trace(ActiveSeekRequestId, "Start", $"Target={target} ResumePlaying={resumePlaying}", target);
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=Seek Start={_currentTime} Target={target} ResumePlaying={resumePlaying} SourceKind={CurrentSource?.Kind} Source={CurrentSource?.Uri}");
-        _lastControlOperation = "Seek";
-        _lastControlError = null;
+        _activeSeek = new PlaybackSeekFrame(_seeking.Operation.RequestId, target, startedAt);
+        _seeking.Begin();
         await TransitionAsync(PlaybackState.Seeking, cancellationToken).ConfigureAwait(false);
         var recordingSuspended = _recording.IsRecording && Demuxer is not null;
         if (recordingSuspended)
         {
             Demuxer!.SuspendRecordingForDiscontinuity();
-            FluxMediaLog.Write(
-                LogLevel.Information, ComponentName, InstanceId, $"Event=PlaybackRecordingSeekSuspended Target={target}");
         }
         try
         {
@@ -595,83 +487,40 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 Demuxer?.ResumeRecordingAfterDiscontinuity();
                 recordingSuspended = false;
                 await TransitionAsync(resumePlaying ? PlaybackState.Completed : PlaybackState.Paused, cancellationToken).ConfigureAwait(false);
-                if (resumePlaying)
-                {
-                    MarkLifecycle("Completed");
-                }
-
                 return PlaybackResult.Success();
             }
 
             if (!await TryDemuxerSeekAsync(target, resumePlaying, cancellationToken).ConfigureAwait(false))
             {
                 await RestartPlaybackWorkerCoreAsync(target, resumePlaying, cancellationToken).ConfigureAwait(false);
-                MarkSeekPath("FullRestart", null);
-                _seeking.Trace(ActiveSeekRequestId, "FullRestart", $"Completed Target={target}", target);
+                _seeking.SetPath(PlaybackSeekPath.FullRestart, null);
             }
 
             Demuxer?.ResumeRecordingAfterDiscontinuity();
             recordingSuspended = false;
-            if (_recording.IsRecording)
-            {
-                FluxMediaLog.Write(
-                    LogLevel.Information, ComponentName, InstanceId, $"Event=PlaybackRecordingSeekResumed Target={target} Path={_seeking.Diagnostic.Path ?? "-"}");
-            }
 
-            if (!await WaitForSeekFirstUiOrRecoverAsync(target, resumePlaying, startedAt, cancellationToken).ConfigureAwait(false))
+            if (!await WaitForSeekFirstFrameOrRecoverAsync(target, resumePlaying, cancellationToken).ConfigureAwait(false))
             {
                 InvokeSubscribersSafely(PositionChanged, new PlaybackPositionChangedEventArgs(target, Duration), nameof(PositionChanged));
                 await RestorePostSeekStateAsync(resumePlaying).ConfigureAwait(false);
-                _seeking.Diagnostic = _seeking.Diagnostic with
-                {
-                    InProgress = false,
-                    CompletedAt = DateTimeOffset.UtcNow,
-                    TotalElapsed = DateTimeOffset.UtcNow - startedAt,
-                    LastError = "Seek completed without a recovered UI frame."
-                };
-                _seeking.UpdateStrategy(_seeking.Diagnostic);
-                _seeking.Trace(ActiveSeekRequestId, "RecoveryFailed", "Seek completed without a recovered UI frame.", target, _seeking.Diagnostic.TotalElapsed);
+                _seeking.Complete(DateTimeOffset.UtcNow - startedAt);
                 return PlaybackResult.Failure(PlaybackError.PlayFailed, "Seek 后未能恢复视频首帧。");
             }
 
             InvokeSubscribersSafely(PositionChanged, new PlaybackPositionChangedEventArgs(target, Duration), nameof(PositionChanged));
             await RestorePostSeekStateAsync(resumePlaying).ConfigureAwait(false);
-            _seeking.Diagnostic = _seeking.Diagnostic with
-            {
-                InProgress = false,
-                ActualPosition = _activeSeek?.FirstFrame is { IsCompletedSuccessfully: true } firstFrame ? firstFrame.Result : null,
-                CompletedAt = DateTimeOffset.UtcNow,
-                TotalElapsed = DateTimeOffset.UtcNow - startedAt
-            };
-            _seeking.UpdateStrategy(_seeking.Diagnostic);
-            _seeking.Trace(ActiveSeekRequestId, "Completed", $"Path={_seeking.Diagnostic.Path ?? "-"} Total={_seeking.Diagnostic.TotalElapsed?.ToString() ?? "-"}", _seeking.Diagnostic.ActualPosition, _seeking.Diagnostic.TotalElapsed);
+            _seeking.Complete(DateTimeOffset.UtcNow - startedAt);
             return PlaybackResult.Success();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            _seeking.Diagnostic = _seeking.Diagnostic with
-            {
-                InProgress = false,
-                CompletedAt = DateTimeOffset.UtcNow,
-                TotalElapsed = DateTimeOffset.UtcNow - startedAt,
-                LastError = "Seek canceled."
-            };
-            _seeking.Trace(ActiveSeekRequestId, "Canceled", "Seek canceled by the playback lifecycle.", target, _seeking.Diagnostic.TotalElapsed);
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             if (_pipeline?.IsCanceled == false && _resyncSignal.Snapshot().FrameEpoch?.IsCurrent == false)
                 _resyncSignal.Request(_currentTime);
             await RestorePostSeekStateAsync(resumePlaying).ConfigureAwait(false);
-            _seeking.Diagnostic = _seeking.Diagnostic with
-            {
-                InProgress = false,
-                CompletedAt = DateTimeOffset.UtcNow,
-                TotalElapsed = DateTimeOffset.UtcNow - startedAt,
-                LastError = ex.Message
-            };
-            _seeking.Trace(ActiveSeekRequestId, "Failed", ex.Message, target, _seeking.Diagnostic.TotalElapsed);
             throw;
         }
         finally
@@ -702,18 +551,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _pauseAfterSeekFrame = false;
         _currentTime = target;
         InvokeSubscribersSafely(PositionChanged, new PlaybackPositionChangedEventArgs(target, Duration), nameof(PositionChanged));
-        _seeking.Diagnostic = _seeking.Diagnostic with
-        {
-            ActualPosition = null,
-            Path = "EndOfMedia",
-            InProgress = false,
-            CompletedAt = DateTimeOffset.UtcNow,
-            TotalElapsed = DateTimeOffset.UtcNow - startedAt,
-            FirstUiFrameElapsed = TimeSpan.Zero,
-            LastError = null
-        };
-        _seeking.UpdateStrategy(_seeking.Diagnostic);
-        _seeking.Trace(ActiveSeekRequestId, "Completed", $"Path=EndOfMedia ResumePlaying={resumePlaying}", target, _seeking.Diagnostic.TotalElapsed);
+        _seeking.SetPath(PlaybackSeekPath.EndOfMedia, null);
+        _seeking.Complete(DateTimeOffset.UtcNow - startedAt);
     }
 
     /// <summary>
@@ -734,8 +573,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             await TransitionAsync(resumePlaying ? PlaybackState.Playing : PlaybackState.Paused, CancellationToken.None).ConfigureAwait(false);
         }
 
-        FluxMediaLog.Write(
-            LogLevel.Information, ComponentName, InstanceId, $"Event=SeekStateRestored State={State} ResumePlaying={resumePlaying} IsPaused={_isPaused} Position={_currentTime}");
     }
 
     /// <summary>
@@ -775,7 +612,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 return ControlFailure(PlaybackError.OperationCanceled, "播放操作正在结束。");
             request = _rates.Submit(rate, _isPaused || State != PlaybackState.Playing, CanChangeSpeed,
                 IsLive ? "直播不支持倍速。" : "未知时长或当前媒体不支持倍速播放。");
-            _lastControlOperation = "SetPlaybackRate";
         }
         finally { _pipelineMutationGate.Release(); }
         // 登记完成即释放管线锁；提交回调也不需要取得这把锁。
@@ -788,20 +624,22 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     public ValueTask<PlaybackResult> SetVolumeAsync(double volume, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (volume is < 0 or > 1)
+        if (!IsFiniteVolume(volume) || volume is < 0 or > 1)
         {
-            var error = CreateError(PlaybackError.InvalidState, "音量必须在 0 到 1 之间。");
+            var error = CreateError(PlaybackError.InvalidState, "音量必须为 0 到 1 之间的有限值。");
             NotifyFault(error);
             throw new PlaybackException(PlaybackError.InvalidState, error);
         }
 
         _volume = volume;
         _pipeline?.SetVolume(_volume, _isMuted);
-        _lastControlOperation = "SetVolume";
-        _lastControlError = null;
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=SetVolume Volume={volume:0.###} Muted={_isMuted} AudioOutputAvailable={_pipeline?.AudioOutputAvailable == true} Backend={_pipeline?.AudioBackend ?? "-"}");
         return new ValueTask<PlaybackResult>(PlaybackResult.Success());
     }
+
+    /// <summary>
+    /// 初始配置与运行时音量共用有限值检查。
+    /// </summary>
+    private static bool IsFiniteVolume(double volume) => !double.IsNaN(volume) && !double.IsInfinity(volume);
 
     /// <summary>
     /// 设置静音状态。
@@ -811,9 +649,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         cancellationToken.ThrowIfCancellationRequested();
         _isMuted = muted;
         _pipeline?.SetVolume(_volume, _isMuted);
-        _lastControlOperation = "SetMuted";
-        _lastControlError = null;
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=SetMuted Muted={muted} Volume={_volume:0.###} AudioOutputAvailable={_pipeline?.AudioOutputAvailable == true} Backend={_pipeline?.AudioBackend ?? "-"}");
         return new ValueTask<PlaybackResult>(PlaybackResult.Success());
     }
 
@@ -829,9 +664,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             if (CurrentMediaInfo?.HasVideo != true) return ControlFailure(PlaybackError.RecordingFailed, "当前媒体没有视频流。");
             if (State is PlaybackState.Created or PlaybackState.Opening or PlaybackState.Failed or PlaybackState.Stopping or PlaybackState.Disposed)
                 return ControlFailure(PlaybackError.InvalidState, "当前状态无法开始录制。");
-            var result = _recording.Start(options, Demuxer, CurrentMediaInfo.HasAudio);
-            _lastControlOperation = "StartRecording";
-            _lastControlError = result.IsSuccess ? null : result.Message;
+            var result = _recording.Start(options, Demuxer);
             return result;
         }
         finally { _pipelineMutationGate.Release(); }
@@ -848,9 +681,9 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     }
 
     /// <summary>
-    /// 返回活动或最近一次录制的诊断快照。
+    /// 读取实际录制状态，不访问输出文件。
     /// </summary>
-    public PlaybackRecordingDiagnosticInfo GetRecordingDiagnosticInfo() => _recording.Snapshot(Demuxer);
+    public PlaybackRecordingState RecordingState => _recording.GetResult(Demuxer).State;
 
     /// <summary>
     /// 获取已打开媒体的基本信息。
@@ -860,69 +693,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         EnsureOpened();
         cancellationToken.ThrowIfCancellationRequested();
         return new ValueTask<MediaInfo>(CurrentMediaInfo!);
-    }
-
-    /// <summary>
-    /// 获取当前运行状态和诊断信息。
-    /// </summary>
-    public PlaybackDiagnosticInfo GetDiagnosticInfo()
-    {
-        var rate = _rates.Snapshot;
-        var hasDuration = CurrentMediaInfo?.Duration > TimeSpan.Zero;
-        TimeSpan? audioVideoDrift = _audioDiagnostic.CurrentTime.HasValue ? _audioDiagnostic.CurrentTime.Value - _currentTime : null;
-        var diagnostic = _diagnostic with
-        {
-            SourceKind = CurrentSource?.Kind ?? _diagnostic.SourceKind,
-            SourceUrl = CurrentSource?.Uri ?? _diagnostic.SourceUrl,
-            Protocol = _diagnostic.Protocol ?? MediaSourcePolicy.GetProtocol(CurrentSource),
-            Container = CurrentMediaInfo?.ContainerFormat ?? _diagnostic.Container,
-            FrameRate = CurrentMediaInfo?.VideoFrameRate ?? _diagnostic.FrameRate,
-            TimingMode = _diagnostic.TimingMode,
-            LowLatencyEnabled = _diagnostic.TimingMode == PlaybackTimingMode.RealtimeLowLatency,
-            FirstUiFrameElapsed = _firstUiFrameElapsed ?? _diagnostic.FirstUiFrameElapsed,
-            LastUiFrameAt = _lastUiFrameAt ?? _diagnostic.LastUiFrameAt,
-            DroppedFrameCount = _videoFrames.DroppedFrameCount,
-            VideoFrameReadyCount = _videoFrames.VideoFrameReadyCount,
-            WorkerRunning = _pipeline?.Completion is { IsCompleted: false } && _diagnostic.WorkerRunning,
-            CanSeek = CanSeek,
-            IsLive = IsLive,
-            HasDuration = hasDuration,
-            CurrentTime = _currentTime,
-            Duration = Duration,
-            PlaybackRate = rate.AppliedRate,
-            RequestedRate = rate.RequestedRate,
-            AppliedRate = rate.AppliedRate,
-            MinRate = rate.MinRate,
-            MaxRate = rate.MaxRate,
-            RateRequestId = rate.RequestId,
-            RateChangeState = rate.State,
-            LastRateError = rate.LastError,
-            Volume = _volume,
-            IsMuted = _isMuted,
-            AudioOutputAvailable = _pipeline?.AudioOutputAvailable == true,
-            AudioStreamIndex = _audioDiagnostic.StreamIndex,
-            AudioSampleRate = _audioDiagnostic.SampleRate,
-            AudioChannels = _audioDiagnostic.Channels,
-            AudioOutputFormat = _audioDiagnostic.OutputFormat,
-            AudioWorkerState = _audioDiagnostic.WorkerState,
-            AudioDecodedFrameCount = _audioDiagnostic.DecodedFrameCount,
-            AudioWrittenPcmBytes = _audioDiagnostic.WrittenPcmBytes,
-            AudioCurrentTime = _audioDiagnostic.CurrentTime,
-            VideoCurrentTime = _currentTime,
-            AudioVideoDrift = audioVideoDrift,
-            LastAudioError = _audioDiagnostic.LastError,
-            AudioOutputDeviceState = _audioDiagnostic.OutputDeviceState,
-            LastControlOperation = _lastControlOperation,
-            LastControlError = _lastControlError,
-            Lifecycle = _lifecycleDiagnostic,
-            Health = BuildHealthDiagnostic(audioVideoDrift),
-            Network = BuildNetworkDiagnostic(),
-            LastSeek = _seeking.Diagnostic with
-            {
-                Trace = _seeking.Snapshot()
-            }
-        };
-        return diagnostic;
     }
 
     /// <summary>
@@ -983,7 +753,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             return result;
         }
         await TransitionAsync(PlaybackState.Stopping, cancellationToken).ConfigureAwait(false);
-        MarkLifecycle("StopStarted");
         _seeking.CancelPending(new OperationCanceledException("Playback has been stopped."));
         var recordingResult = await StopRecordingCoreAsync(CancellationToken.None).ConfigureAwait(false);
         _isPaused = false;
@@ -996,7 +765,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         }
         // 先收敛停止状态，再向调用方反馈清理错误。
         await TransitionAsync(PlaybackState.Stopped).ConfigureAwait(false);
-        MarkLifecycle("StopCompleted");
         if (cleanupFailure is not null)
         {
             NotifyFault(CreateError(PlaybackError.PlayFailed, "停止播放时资源清理失败。"), cleanupFailure);
@@ -1049,38 +817,27 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     }
 
     /// <summary>
-    /// 发布视频帧并更新进度与首帧统计。
+    /// 发布视频帧，并通知进度与跳转首帧。
     /// </summary>
-    private ValueTask PublishVideoFrameAsync(VideoFrame frame, long _)
+    private ValueTask PublishVideoFrameAsync(VideoFrame frame)
     {
-        if (!frame.IsCurrent) { _videoFrames.RecordDrop(); return default; }
+        if (!frame.IsCurrent) return default;
         var seek = _activeSeek;
         _currentTime = frame.Timestamp;
         var now = DateTimeOffset.UtcNow;
-        _lastUiFrameAt = now;
         if (_positionNotifications.ShouldPublish(now))
         {
             InvokeSubscribersSafely(PositionChanged, new PlaybackPositionChangedEventArgs(_currentTime, Duration), nameof(PositionChanged));
         }
         // 视频链路④触发：会话帧事件通知 Player。
         InvokeSubscribersSafely(VideoFrameReady, new PlaybackVideoFrameEventArgs(frame), nameof(VideoFrameReady));
-        if (_lifecycleDiagnostic.FirstUiFrameAt is null)
-        {
-            MarkLifecycle("FirstUiFrame");
-        }
-        if (seek is not null && seek.TryAccept(frame, out var elapsed))
-        {
-            _seeking.Diagnostic = _seeking.Diagnostic with { ActualPosition = frame.Timestamp, FirstUiFrameElapsed = elapsed };
-            _seeking.Trace(seek.RequestId, "FirstUI", $"Frame={frame.Timestamp} Timeline={frame.TimelineId} Elapsed={elapsed}", frame.Timestamp, elapsed);
-        }
+        seek?.TryAccept(frame);
 
         if (_pauseAfterSeekFrame && (seek is null || seek.FirstFrame.IsCompletedSuccessfully))
         {
             _pauseAfterSeekFrame = false;
             _isPaused = true;
         }
-
-        _firstUiFrameElapsed ??= _playStartedAt is null ? null : DateTimeOffset.UtcNow - _playStartedAt.Value;
         return default;
     }
 
@@ -1106,8 +863,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _currentTime = startPosition;
         _isPaused = false;
         _pauseAfterSeekFrame = !resumePlaying;
-        _firstUiFrameElapsed = null;
-        _playStartedAt = DateTimeOffset.UtcNow;
         try
         {
             var pipeline = CreatePipeline(startPosition);
@@ -1145,18 +900,14 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
 
         try
         {
-            FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=SeekDemuxerStart Target={target} ResumePlaying={resumePlaying} Current={_currentTime}");
-            _seeking.Trace(ActiveSeekRequestId, "DemuxerStart", $"Target={target} Current={_currentTime}", target);
             _isPaused = true;
             _pipeline?.ClearAudio();
             _videoFrames.ClearPublicOutput();
             var demuxStartedAt = DateTimeOffset.UtcNow;
             await demuxer.SeekAsync(target, cancellationToken).ConfigureAwait(false);
             var demuxElapsed = DateTimeOffset.UtcNow - demuxStartedAt;
-            ApplyActiveDecoderResync(target, resumePlaying, "DemuxerSeek");
-            MarkSeekPath("Demuxer", demuxElapsed);
-            _seeking.Trace(ActiveSeekRequestId, "DemuxerCompleted", $"Target={target}", target, demuxElapsed);
-            FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=SeekDemuxerCompleted Target={target} ResumePlaying={resumePlaying}");
+            ApplyActiveDecoderResync(target, resumePlaying);
+            _seeking.SetPath(PlaybackSeekPath.Demuxer, demuxElapsed);
             return true;
         }
         catch (OperationCanceledException)
@@ -1166,7 +917,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         catch (Exception ex)
         {
             FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=SeekDemuxerFailed Target={target} Error={ex.Message}", ex);
-            _seeking.Trace(ActiveSeekRequestId, "DemuxerFailed", ex.Message, target);
             return false;
         }
     }
@@ -1174,7 +924,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// <summary>
     /// 通知音视频解码器清空旧状态并重新同步。
     /// </summary>
-    private void ApplyActiveDecoderResync(TimeSpan position, bool resumePlaying, string reason)
+    private void ApplyActiveDecoderResync(TimeSpan position, bool resumePlaying)
     {
         _pipeline?.ClearAudio();
         _videoFrames.ClearPublicOutput();
@@ -1185,76 +935,41 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _currentTime = position;
         _isPaused = false;
         _pauseAfterSeekFrame = !resumePlaying;
-        _firstUiFrameElapsed = null;
-        _playStartedAt = DateTimeOffset.UtcNow;
-        _audioDiagnostic = _audioDiagnostic with
-        {
-            WorkerState = reason,
-            CurrentTime = position,
-            OutputBufferedDuration = TimeSpan.Zero,
-            OutputDeviceDelay = TimeSpan.Zero
-        };
-        _seeking.Diagnostic = _seeking.Diagnostic with
-        {
-            ResyncVersion = request.Version
-        };
-        _seeking.Trace(ActiveSeekRequestId, "DecoderResync", $"Reason={reason} Version={request.Version} Position={position}", position);
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=DecoderResyncSignal Reason={reason} Version={request.Version} Timeline={request.FrameEpoch?.Id} Position={position} ResumePlaying={resumePlaying}");
-    }
-
-    /// <summary>
-    /// 记录本次跳转实际采用的执行路径。
-    /// </summary>
-    private void MarkSeekPath(string path, TimeSpan? demuxerSeekElapsed)
-    {
-        _seeking.Diagnostic = _seeking.Diagnostic with
-        {
-            Path = path,
-            Strategy = _seeking.Strategy,
-            NextCoalesceDelay = _seeking.CoalesceDelay,
-            DemuxerSeekElapsed = demuxerSeekElapsed
-        };
     }
 
     /// <summary>
     /// 等待跳转首帧，超时时重建管线恢复。
     /// </summary>
-    private async Task<bool> WaitForSeekFirstUiOrRecoverAsync(TimeSpan target, bool resumePlaying, DateTimeOffset seekStartedAt, CancellationToken cancellationToken)
+    private async Task<bool> WaitForSeekFirstFrameOrRecoverAsync(TimeSpan target, bool resumePlaying, CancellationToken cancellationToken)
     {
         if (CurrentMediaInfo?.HasVideo != true)
         {
             return true;
         }
 
-        if (await WaitForSeekFirstUiAsync(FirstUiRecoveryTimeout, cancellationToken).ConfigureAwait(false))
+        if (await WaitForSeekFirstFrameAsync(SeekFirstFrameTimeout, cancellationToken).ConfigureAwait(false))
         {
             return true;
         }
-
-        _seeking.Trace(ActiveSeekRequestId, "FirstUITimeout", $"Timeout={FirstUiRecoveryTimeout} Path={_seeking.Diagnostic.Path ?? "-"}", target, DateTimeOffset.UtcNow - seekStartedAt);
-        if (string.Equals(_seeking.Diagnostic.Path, "FullRestart", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(_seeking.Diagnostic.Path, "FullRestartRecovery", StringComparison.OrdinalIgnoreCase))
+        if (_seeking.Operation.Path == PlaybackSeekPath.FullRestart ||
+            _seeking.Operation.Path == PlaybackSeekPath.FullRestartRecovery)
         {
             return false;
         }
 
-        _seeking.Diagnostic = _seeking.Diagnostic with
-        {
-            FirstUiRecoveryAttempted = true,
-            RecoveryReason = "FirstUiTimeout"
-        };
-        _seeking.Trace(ActiveSeekRequestId, "RecoveryFullRestart", $"Target={target} PreviousPath={_seeking.Diagnostic.Path ?? "-"}", target, DateTimeOffset.UtcNow - seekStartedAt);
+        _seeking.MarkRecoveryAttempted();
         await RestartPlaybackWorkerCoreAsync(target, resumePlaying, cancellationToken).ConfigureAwait(false);
-        MarkSeekPath("FullRestartRecovery", null);
-        return await WaitForSeekFirstUiAsync(FirstUiRecoveryTimeout, cancellationToken).ConfigureAwait(false);
+        _seeking.SetPath(PlaybackSeekPath.FullRestartRecovery, null);
+        return await WaitForSeekFirstFrameAsync(SeekFirstFrameTimeout, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// 等待跳转后的视频首帧到达显示端。
+    /// 等待本次跳转的核心首帧确认。
     /// </summary>
-    private async Task<bool> WaitForSeekFirstUiAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<bool> WaitForSeekFirstFrameAsync(TimeSpan timeout, CancellationToken cancellationToken)
     {
-        var firstFrame = _activeSeek?.FirstFrame;
+        var seek = _activeSeek;
+        var firstFrame = seek?.FirstFrame;
         if (firstFrame is null) return false;
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var deadline = Task.Delay(timeout, wait.Token);
@@ -1262,7 +977,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         if (completed == firstFrame)
         {
             wait.Cancel();
-            await firstFrame.ConfigureAwait(false);
+            var accepted = await firstFrame.ConfigureAwait(false);
+            _seeking.RecordFirstFrame(seek!.RequestId, accepted.Elapsed);
             return true;
         }
         cancellationToken.ThrowIfCancellationRequested();
@@ -1288,28 +1004,27 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             if (!ReferenceEquals(_pipeline, failedPipeline) || !ReferenceEquals(_operationCts, operation) || IsDisposed || State is PlaybackState.Stopping or PlaybackState.Stopped or PlaybackState.Disposed or PlaybackState.Failed)
                 return;
 
-            while (_currentOptions.Network.ReconnectEnabled &&
-                _networkRecoveryAttemptCount < Math.Max(0, _currentOptions.NetworkReconnectAttempts))
+            var attempt = 0;
+            var maxAttempts = Math.Max(0, _currentOptions.NetworkReconnectAttempts);
+            while (_currentOptions.Network.ReconnectEnabled && attempt < maxAttempts)
             {
                 operationToken.ThrowIfCancellationRequested();
-                var attempt = Interlocked.Increment(ref _networkRecoveryAttemptCount);
+                attempt++;
                 var resumePlaying = State != PlaybackState.Paused && !_isPaused;
                 var startPosition = CanSeekCurrentSource() ? _currentTime : TimeSpan.Zero;
                 FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=NetworkRecoveryStart Attempt={attempt} Reason={reason} ResumePlaying={resumePlaying} Start={startPosition}");
                 try
                 {
                     await RestartPlaybackWorkerCoreAsync(startPosition, resumePlaying, operationToken).ConfigureAwait(false);
-                    FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=NetworkRecoveryCompleted Attempt={attempt} ResumePlaying={resumePlaying}");
                     return;
                 }
                 catch (OperationCanceledException) when (operationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     reason = ex.Message;
-                    _lastNetworkError = reason;
                     FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=NetworkRecoveryAttemptFailed Attempt={attempt}", ex);
-                    if (_networkRecoveryAttemptCount < Math.Max(0, _currentOptions.NetworkReconnectAttempts))
-                        await Task.Delay(TimeSpan.FromSeconds(Math.Max(0, _currentOptions.Network.ReconnectDelayMax)), operationToken).ConfigureAwait(false);
+                    if (attempt < maxAttempts)
+                        await Task.Delay(_currentOptions.Network.ReconnectDelay, operationToken).ConfigureAwait(false);
                 }
             }
 
@@ -1325,11 +1040,9 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         }
         catch (OperationCanceledException) when (operationToken.IsCancellationRequested)
         {
-            FluxMediaLog.Write(LogLevel.Debug, ComponentName, InstanceId, $"Event=NetworkRecoveryCanceled State={State}");
         }
         catch (Exception ex)
         {
-            _lastNetworkError = ex.Message;
             FluxMediaLog.Write(LogLevel.Error, ComponentName, InstanceId, "Event=NetworkRecoveryFailed", ex);
             if (gateEntered && !IsDisposed && !operationToken.IsCancellationRequested)
             {
@@ -1342,206 +1055,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         {
             if (gateEntered) _pipelineMutationGate.Release();
         }
-    }
-
-    /// <summary>
-    /// 保存最新音频工作线程状态。
-    /// </summary>
-    private void UpdateAudioDiagnostics(AudioPlaybackDiagnostics diagnostic)
-    {
-        // 音频链路⑤接收：会话保存状态，供公开诊断读取。
-        _audioDiagnostic = diagnostic;
-    }
-
-    /// <summary>
-    /// 更新打开媒体时的耗时和流信息。
-    /// </summary>
-    private void UpdateOpenDiagnostics(PlaybackDiagnosticInfo diagnostic)
-    {
-        _diagnostic = _diagnostic with
-        {
-            SourceKind = diagnostic.SourceKind,
-            SourceUrl = diagnostic.SourceUrl,
-            FFmpegOpenOptions = diagnostic.FFmpegOpenOptions,
-            OpenElapsed = diagnostic.OpenElapsed,
-            StreamInfoElapsed = diagnostic.StreamInfoElapsed,
-            Protocol = diagnostic.Protocol,
-            Container = diagnostic.Container,
-            FrameRate = diagnostic.FrameRate,
-            TimingMode = diagnostic.TimingMode,
-            LowLatencyEnabled = diagnostic.LowLatencyEnabled,
-            CanSeek = diagnostic.CanSeek,
-            HasDuration = diagnostic.HasDuration
-        };
-    }
-
-    /// <summary>
-    /// 更新视频解码线程的统计和运行状态。
-    /// </summary>
-    private void UpdateWorkerDiagnostics(PlaybackWorkerDiagnostics worker)
-    {
-        _diagnostic = _diagnostic with
-        {
-            SourceKind = worker.SourceKind,
-            SourceUrl = worker.SourceUrl,
-            FirstDecodedFrameElapsed = worker.FirstDecodedFrameElapsed ?? _diagnostic.FirstDecodedFrameElapsed,
-            Protocol = worker.Protocol ?? _diagnostic.Protocol,
-            FrameRate = worker.FrameRate ?? _diagnostic.FrameRate,
-            TimingMode = worker.TimingMode,
-            LowLatencyEnabled = worker.LowLatencyEnabled,
-            ReadPacketCount = worker.ReadPacketCount,
-            DecodedFrameCount = worker.DecodedFrameCount,
-            PushedFrameCount = worker.PushedFrameCount,
-            DroppedFrameCount = worker.DroppedVideoFrameCount,
-            BufferingDecisionCount = worker.BufferingDecisionCount,
-            VideoBufferedDuration = worker.LastVideoBufferedDuration,
-            LowLatencyCatchUpActive = worker.LowLatencyCatchUpActive,
-            LastVideoAudioDistance = worker.LastVideoAudioDistance,
-            LastAudioClock = worker.LastAudioClock,
-            LastFrameAt = worker.LastFrameAt ?? _diagnostic.LastFrameAt,
-            WorkerRunning = worker.WorkerRunning,
-            WorkerExitReason = worker.ExitReason ?? _diagnostic.WorkerExitReason,
-            LastFFmpegError = worker.LastFFmpegError ?? _diagnostic.LastFFmpegError,
-            HardwareAccelerationRequested = worker.HardwareAccelerationRequested,
-            HardwareAccelerationActive = worker.HardwareAccelerationActive,
-            VideoDecoderBackend = worker.VideoDecoderBackend,
-            VideoPresentationBackend = worker.VideoPresentationBackend,
-            HardwareAccelerationFailureReason = worker.HardwareAccelerationFailureReason
-        };
-    }
-
-    /// <summary>
-    /// 记录播放生命周期事件及发生时间。
-    /// </summary>
-    private void MarkLifecycle(string eventName)
-    {
-        var now = DateTimeOffset.UtcNow;
-        _lifecycleDiagnostic = _lifecycleDiagnostic with
-        {
-            LastEvent = eventName,
-            LastEventAt = now,
-            OpenedAt = eventName == "OpenCompleted" ? now : _lifecycleDiagnostic.OpenedAt,
-            PlayStartedAt = eventName == "PlayStarted" ? now : _lifecycleDiagnostic.PlayStartedAt,
-            FirstUiFrameAt = eventName == "FirstUiFrame" ? now : _lifecycleDiagnostic.FirstUiFrameAt,
-            CompletedAt = eventName == "Completed" ? now : _lifecycleDiagnostic.CompletedAt,
-            StopStartedAt = eventName == "StopStarted" ? now : _lifecycleDiagnostic.StopStartedAt,
-            StopCompletedAt = eventName == "StopCompleted" ? now : _lifecycleDiagnostic.StopCompletedAt,
-            PlayCount = eventName == "PlayStarted" ? _lifecycleDiagnostic.PlayCount + 1 : _lifecycleDiagnostic.PlayCount,
-            PauseCount = eventName == "Paused" ? _lifecycleDiagnostic.PauseCount + 1 : _lifecycleDiagnostic.PauseCount,
-            StopCount = eventName == "StopCompleted" ? _lifecycleDiagnostic.StopCount + 1 : _lifecycleDiagnostic.StopCount,
-            NaturalCompletionCount = eventName == "Completed" ? _lifecycleDiagnostic.NaturalCompletionCount + 1 : _lifecycleDiagnostic.NaturalCompletionCount
-        };
-        FluxMediaLog.Write(LogLevel.Information, ComponentName, InstanceId, $"Event=PlaybackLifecycle EventName={eventName} State={State} Position={_currentTime} PlayCount={_lifecycleDiagnostic.PlayCount} PauseCount={_lifecycleDiagnostic.PauseCount} StopCount={_lifecycleDiagnostic.StopCount} Completed={_lifecycleDiagnostic.NaturalCompletionCount}");
-    }
-
-    /// <summary>
-    /// 根据帧输出和同步状态生成健康诊断。
-    /// </summary>
-    private PlaybackHealthDiagnosticInfo BuildHealthDiagnostic(TimeSpan? audioVideoDrift)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var lastUiFrameAt = _lastUiFrameAt ?? _diagnostic.LastUiFrameAt;
-        TimeSpan? lastUiFrameAge = lastUiFrameAt is null ? null : now - lastUiFrameAt.Value;
-        TimeSpan? lastWorkerFrameAge = _diagnostic.LastFrameAt is null ? null : now - _diagnostic.LastFrameAt.Value;
-        var isPlaying = State == PlaybackState.Playing && !_isPaused;
-        var hasVideo = CurrentMediaInfo?.HasVideo == true;
-        var seeking = _seeking.Diagnostic.InProgress;
-        var reason = default(string);
-
-        if (isPlaying && !seeking)
-        {
-            if (hasVideo && _diagnostic.WorkerRunning && lastUiFrameAge is not null && lastUiFrameAge > TimeSpan.FromSeconds(2))
-            {
-                reason = "VideoUiStall";
-            }
-            else if (hasVideo && !_diagnostic.WorkerRunning && _pipeline?.Completion is { IsCompleted: true } && State != PlaybackState.Completed)
-            {
-                reason = "VideoWorkerStopped";
-            }
-            else if (!string.IsNullOrWhiteSpace(_audioDiagnostic.LastError))
-            {
-                reason = "AudioError";
-            }
-            else if (_diagnostic.LastFFmpegError is not null)
-            {
-                reason = "FFmpegError";
-            }
-            else if (Demuxer?.ReadTimeoutCount > 0 && _pipeline?.DemuxerExited == true)
-            {
-                reason = "NetworkReadTimeout";
-            }
-            else if (CurrentSource?.Kind == MediaSourceKind.NetworkStream &&
-                _pipeline?.DemuxerExited == true &&
-                !string.IsNullOrWhiteSpace(Demuxer?.LastError) &&
-                State != PlaybackState.Completed)
-            {
-                reason = "NetworkReadEnded";
-            }
-        }
-
-        var health = new PlaybackHealthDiagnosticInfo
-        {
-            IsHealthy = reason is null,
-            IsStalled = reason is "VideoUiStall" or "VideoWorkerStopped" or "NetworkReadTimeout" or "NetworkReadEnded",
-            Reason = reason,
-            LastUiFrameAge = lastUiFrameAge,
-            LastWorkerFrameAge = lastWorkerFrameAge,
-            VideoBufferedDuration = _diagnostic.VideoBufferedDuration,
-            WorkerRunning = _diagnostic.WorkerRunning,
-            WorkerExitReason = _diagnostic.WorkerExitReason,
-            AudioWorkerState = _audioDiagnostic.WorkerState,
-            AudioBufferedDuration = _audioDiagnostic.OutputBufferedDuration,
-            AudioDeviceDelay = _audioDiagnostic.OutputDeviceDelay,
-            AudioVideoDrift = audioVideoDrift,
-            CheckedAt = now
-        };
-
-        LogHealthTransition(health);
-        _healthDiagnostic = health;
-        return health;
-    }
-
-    /// <summary>
-    /// 整理读取超时和网络恢复状态。
-    /// </summary>
-    private PlaybackNetworkDiagnosticInfo BuildNetworkDiagnostic()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var current = Demuxer?.GetNetworkDiagnostic();
-        var demuxer = current ?? _retiredDemuxerDiagnostic;
-        var lastPacketAt = demuxer?.LastPacketAt ?? _retiredDemuxerDiagnostic?.LastPacketAt;
-        TimeSpan? lastPacketAge = lastPacketAt is null ? null : now - lastPacketAt.Value;
-        return new PlaybackNetworkDiagnosticInfo
-        {
-            IsNetworkSource = CurrentSource?.Kind == MediaSourceKind.NetworkStream,
-            ReconnectEnabled = _currentOptions.Network.ReconnectEnabled,
-            ConfiguredReconnectAttempts = _currentOptions.Network.ReconnectEnabled ? _currentOptions.NetworkReconnectAttempts : 0,
-            RecoveryAttemptCount = Volatile.Read(ref _networkRecoveryAttemptCount),
-            ReadTimeoutCount = Volatile.Read(ref _retiredReadTimeouts) + (current?.ReadTimeoutCount ?? 0),
-            LastPacketAt = lastPacketAt,
-            LastPacketAge = lastPacketAge,
-            DemuxerState = demuxer?.DemuxerState,
-            DemuxerExitReason = demuxer?.DemuxerExitReason,
-            LastNetworkError = _lastNetworkError ?? demuxer?.LastNetworkError,
-            DroppedVideoPacketCount = demuxer?.DroppedVideoPacketCount ?? 0,
-            DroppedAudioPacketCount = demuxer?.DroppedAudioPacketCount ?? 0,
-            SeekDiscardedVideoPacketCount = demuxer?.SeekDiscardedVideoPacketCount ?? 0,
-            SeekDiscardedAudioPacketCount = demuxer?.SeekDiscardedAudioPacketCount ?? 0,
-            StopDiscardedVideoPacketCount = demuxer?.StopDiscardedVideoPacketCount ?? 0,
-            StopDiscardedAudioPacketCount = demuxer?.StopDiscardedAudioPacketCount ?? 0
-        };
-    }
-
-    /// <summary>
-    /// 健康状态发生变化时输出诊断日志。
-    /// </summary>
-    private void LogHealthTransition(PlaybackHealthDiagnosticInfo health)
-    {
-        var signature = $"{health.IsHealthy}|{health.Reason ?? "-"}|{health.WorkerRunning}|{health.AudioWorkerState ?? "-"}|{health.WorkerExitReason ?? "-"}";
-        if (signature == _lastHealthSignature) return;
-        _lastHealthSignature = signature;
-        FluxMediaLog.Write(
-            health.IsHealthy ? LogLevel.Information : LogLevel.Warning, ComponentName, InstanceId, $"Event=PlaybackHealthChanged Healthy={health.IsHealthy} Stalled={health.IsStalled} Reason={health.Reason ?? "-"} LastUiFrameAge={health.LastUiFrameAge?.ToString() ?? "-"} LastWorkerFrameAge={health.LastWorkerFrameAge?.ToString() ?? "-"} VideoBuffered={health.VideoBufferedDuration?.ToString() ?? "-"} WorkerRunning={health.WorkerRunning} WorkerExit={health.WorkerExitReason ?? "-"} AudioState={health.AudioWorkerState ?? "-"} AudioBuffered={health.AudioBufferedDuration?.ToString() ?? "-"} AudioDelay={health.AudioDeviceDelay?.ToString() ?? "-"} Drift={health.AudioVideoDrift?.ToString() ?? "-"}");
     }
 
     /// <summary>
@@ -1606,7 +1119,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// </summary>
     private PlaybackResult ControlFailure(PlaybackError error, string message)
     {
-        _lastControlError = message;
         FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=PlaybackControlFailed Error={error} Message={message} State={State} SourceKind={CurrentSource?.Kind} Source={CurrentSource?.Uri}");
         return PlaybackResult.Failure(error, message);
     }
@@ -1629,14 +1141,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// </summary>
     private FFmpegSharedDemuxer? Demuxer => _pipeline?.Demuxer;
     /// <summary>
-    /// 已退役管线累计的读取超时次数。
-    /// </summary>
-    private int _retiredReadTimeouts;
-    /// <summary>
-    /// 最近退役管线的状态及包统计。
-    /// </summary>
-    private volatile PlaybackNetworkDiagnosticInfo? _retiredDemuxerDiagnostic;
-    /// <summary>
     /// 创建新一代管线，旧代通知不会再写入当前会话。
     /// </summary>
     private PlaybackPipeline CreatePipeline(TimeSpan position)
@@ -1644,11 +1148,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         PlaybackPipeline? pipeline = null;
         var callbacks = new PlaybackPipelineCallbacks(() => _isPaused, () => PlaybackRate, () => _volume, () => _isMuted,
             _resyncSignal.Snapshot, () => Volatile.Read(ref _videoOutputCapabilities),
-            diagnostic => { if (ReferenceEquals(_pipeline, pipeline)) UpdateWorkerDiagnostics(diagnostic); },
-            // 音频链路⑤绑定：只接收当前管线的诊断。
-            diagnostic => { if (ReferenceEquals(_pipeline, pipeline)) UpdateAudioDiagnostics(diagnostic); },
             // 视频链路④绑定：只让当前管线发布到会话。
-            (frame, count) => ReferenceEquals(_pipeline, pipeline) ? PublishVideoFrameAsync(frame, count) : default);
+            frame => ReferenceEquals(_pipeline, pipeline) ? PublishVideoFrameAsync(frame) : default);
         pipeline = new PlaybackPipeline(CurrentSource!, _currentOptions, InstanceId, position, _videoFrames, callbacks, _operationCts!.Token, _rates);
         _pipeline = pipeline;
         return pipeline;
@@ -1658,7 +1159,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// </summary>
     private void StartPipeline(PlaybackPipeline pipeline)
     {
-        _playStartedAt = DateTimeOffset.UtcNow;
         pipeline.Start();
         _ = ObservePipelineAsync(pipeline);
     }
@@ -1674,18 +1174,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         var errors = new List<Exception>();
         try { await pipeline.DisposeAsync().ConfigureAwait(false); }
         catch (Exception exception) { errors.Add(exception); }
-        try
-        {
-            var diagnostic = pipeline.Demuxer.GetNetworkDiagnostic();
-            Interlocked.Add(ref _retiredReadTimeouts, diagnostic.ReadTimeoutCount);
-            _retiredDemuxerDiagnostic = diagnostic;
-        }
-        catch (Exception exception) { errors.Add(exception); }
         try { _videoFrames.ClearPublicOutput(); }
         catch (Exception exception) { errors.Add(exception); }
         if (errors.Count == 0) return null;
         var failure = new AggregateException("播放管线退役时发生资源清理错误。", errors);
-        _lastControlError = failure.Message;
         FluxMediaLog.Write(LogLevel.Error, ComponentName, InstanceId, "Event=PipelineRetirementFailed", failure);
         return failure;
     }
@@ -1696,13 +1188,16 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     private async Task ObservePipelineAsync(PlaybackPipeline pipeline)
     {
         Exception? failure = null;
-        try { await pipeline.Completion!.ConfigureAwait(false); }
+        try
+        {
+            var completion = pipeline.Completion!;
+            await completion.ConfigureAwait(false);
+        }
         catch (Exception exception) { failure = exception; }
         if (!ReferenceEquals(_pipeline, pipeline) || _operationCts?.IsCancellationRequested != false || IsDisposed) return;
         if (failure is OperationCanceledException && pipeline.IsCanceled) return;
-        if (failure is not null && !pipeline.HasControlFailure && CurrentSource?.Kind == MediaSourceKind.NetworkStream && pipeline.Demuxer.State == "Faulted")
+        if (failure is not null && !pipeline.HasControlFailure && CurrentSource?.Kind == MediaSourceKind.NetworkStream && pipeline.Demuxer.HasFailed)
         {
-            _lastNetworkError = failure.Message;
             await TryRecoverNetworkPlaybackAsync(pipeline, failure.Message).ConfigureAwait(false);
             return;
         }
@@ -1713,7 +1208,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             await StopRecordingCoreAsync(CancellationToken.None).ConfigureAwait(false);
             if (failure is null)
             {
-                MarkLifecycle("Completed");
                 await TransitionAsync(PlaybackState.Completed).ConfigureAwait(false);
             }
             else
@@ -1732,7 +1226,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     }
 
     /// <summary>
-    /// 独立管理跳转合并与诊断。
+    /// 独立管理跳转请求合并。
     /// </summary>
     private readonly PlaybackSeekController _seeking;
 
@@ -1763,8 +1257,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     {
         if (!_recording.IsRecording) return PlaybackResult.Success();
         var result = await _recording.StopAsync(Demuxer, cancellationToken).ConfigureAwait(false);
-        _lastControlOperation = "StopRecording";
-        _lastControlError = result.IsSuccess ? null : result.Message;
         if (!result.IsSuccess)
         {
             NotifyFault(CreateError(result.Error, result.Message ?? "录制收尾失败。"));

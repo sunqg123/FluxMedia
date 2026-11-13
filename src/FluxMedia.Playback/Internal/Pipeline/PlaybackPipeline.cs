@@ -9,7 +9,7 @@ namespace FluxMedia.Playback.Internal;
 /// <summary>
 /// 独占一次播放管线的线程、取消信号和原生资源。
 /// </summary>
-internal sealed class PlaybackPipeline : IAsyncDisposable
+internal sealed partial class PlaybackPipeline : IAsyncDisposable
 {
     /// <summary>
     /// 管线固定的媒体源。
@@ -126,9 +126,10 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
     /// </summary>
     public bool HasControlFailure => Volatile.Read(ref _controlFailure) is not null;
     /// <summary>
-    /// 最新音频时钟，仅属于当前管线。
+    /// 当前音频线程提供的同步时钟。
     /// </summary>
-    public AudioPlaybackDiagnostics AudioDiagnostics { get; private set; } = new();
+    public AudioClockSnapshot? AudioClock => _audio?.Clock;
+
     /// <summary>
     /// 当前音频设备是否可用。
     /// </summary>
@@ -177,11 +178,9 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
         {
             _audioOutput = AudioOutputDeviceFactory.Create(_instanceId);
             var audioInput = new FFmpegPacketInput(Demuxer.AudioStream, Demuxer.AudioPackets, packetGeneration);
-            // 音频链路③绑定：诊断回调交给 UpdateAudioDiagnostics。
             var audioCallbacks = new AudioPlaybackWorkerCallbacks(
                 volume: _callbacks.Volume,
                 isMuted: _callbacks.IsMuted,
-                diagnostics: UpdateAudioDiagnostics,
                 packetConsumed: packetConsumed);
             _rates.AudioStarting(RateGeneration);
             _audio = new FFmpegPacketAudioPlaybackWorker(workerContext, audioInput, _audioOutput, audioCallbacks,
@@ -192,9 +191,8 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
         var videoCallbacks = new VideoPlaybackWorkerCallbacks(
             // 视频链路①绑定：解码输出交给帧泵接收。
             frameReady: _frames.Queue,
-            diagnostics: _callbacks.VideoDiagnostics,
-            // 播放时钟绑定：视频调度读取当前管线的音频诊断。
-            audioDiagnostics: () => AudioDiagnostics,
+            // 播放时钟绑定：直接读取本代音频线程的时钟。
+            audioClock: () => AudioClock,
             bufferedDuration: () => Demuxer.VideoBufferedDuration,
             bufferedPacketCount: () => Demuxer.VideoPacketCount,
             videoCapabilities: _callbacks.VideoCapabilities,
@@ -253,15 +251,6 @@ internal sealed class PlaybackPipeline : IAsyncDisposable
                 throw new InvalidOperationException("管线控制操作失败。", failure);
             throw;
         }
-    }
-    /// <summary>
-    /// 更新独立音频时钟后通知所属会话。
-    /// </summary>
-    private void UpdateAudioDiagnostics(AudioPlaybackDiagnostics diagnostic)
-    {
-        // 音频链路④接收：保存时钟供视频同步，并转发会话。
-        AudioDiagnostics = diagnostic;
-        _callbacks.AudioDiagnostics(diagnostic);
     }
     /// <summary>
     /// 修改当前设备的音量。

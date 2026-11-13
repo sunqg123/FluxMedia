@@ -31,6 +31,12 @@ internal static unsafe class FFmpegErrorHelper
     }
 
     /// <summary>
+    /// 仅转换负错误码，成功时返回空值。
+    /// </summary>
+    public static string? GetErrorMessageOrNull(int errorCode)
+        => errorCode < 0 ? GetErrorMessage(errorCode) : null;
+
+    /// <summary>
     /// 返回错误码时抛出包含说明的异常。
     /// </summary>
     public static void ThrowIfError(int errorCode, string operationName)

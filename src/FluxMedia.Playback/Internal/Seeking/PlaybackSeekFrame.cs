@@ -3,7 +3,7 @@ using FluxMedia.Core.Models;
 namespace FluxMedia.Playback.Internal;
 
 /// <summary>
-/// 一次跳转独立等待本代首帧，不依赖可变诊断快照。
+/// 一次跳转独立等待本代有效首帧。
 /// </summary>
 internal sealed class PlaybackSeekFrame
 {
@@ -18,7 +18,7 @@ internal sealed class PlaybackSeekFrame
     /// <summary>
     /// 本代首帧的完成通知。
     /// </summary>
-    private TaskCompletionSource<TimeSpan> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private TaskCompletionSource<(TimeSpan Timestamp, TimeSpan Elapsed)> _completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <summary>
     /// 固定请求、目标和开始时间。
@@ -45,7 +45,7 @@ internal sealed class PlaybackSeekFrame
     /// <summary>
     /// 只由本代目标附近帧完成的通知。
     /// </summary>
-    public Task<TimeSpan> FirstFrame { get { lock (_sync) return _completion.Task; } }
+    public Task<(TimeSpan Timestamp, TimeSpan Elapsed)> FirstFrame { get { lock (_sync) return _completion.Task; } }
 
     /// <summary>
     /// 定位或重建完成后绑定独立帧代次。
@@ -55,19 +55,20 @@ internal sealed class PlaybackSeekFrame
         lock (_sync)
         {
             _epoch = epoch;
-            _completion = new TaskCompletionSource<TimeSpan>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _completion = new TaskCompletionSource<(TimeSpan Timestamp, TimeSpan Elapsed)>(TaskCreationOptions.RunContinuationsAsynchronously);
         }
     }
 
     /// <summary>
     /// 仅接收本次定位的有效首帧，旧帧不会结束等待。
     /// </summary>
-    public bool TryAccept(VideoFrame frame, out TimeSpan elapsed)
+    public bool TryAccept(VideoFrame frame)
     {
-        elapsed = DateTimeOffset.UtcNow - StartedAt;
         lock (_sync)
         {
-            return _epoch is not null && frame.IsCurrent && frame.IsFromEpoch(_epoch) && frame.Timestamp + TimeSpan.FromMilliseconds(40) >= Target && _completion.TrySetResult(frame.Timestamp);
+            if (_completion.Task.IsCompleted || _epoch is null || !frame.IsCurrent || !frame.IsFromEpoch(_epoch)
+                || frame.Timestamp + TimeSpan.FromMilliseconds(40) < Target) return false;
+            return _completion.TrySetResult((frame.Timestamp, DateTimeOffset.UtcNow - StartedAt));
         }
     }
 }

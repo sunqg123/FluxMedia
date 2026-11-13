@@ -29,7 +29,7 @@ internal sealed class PlaybackRateController
     /// </summary>
     private PlaybackOptions _options = new();
     /// <summary>
-    /// 当前原子诊断与实际倍速。
+    /// 原子发布的换速请求结果与实际倍速。
     /// </summary>
     private PlaybackRateSnapshot _snapshot = new();
     /// <summary>

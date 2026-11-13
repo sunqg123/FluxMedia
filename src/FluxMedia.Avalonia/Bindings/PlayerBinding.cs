@@ -29,6 +29,41 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     private double _positionSeconds;
 
     /// <summary>
+    /// 最近已通知界面的进度。
+    /// </summary>
+    private TimeSpan _publishedPosition;
+
+    /// <summary>
+    /// 最近已通知界面的媒体时长。
+    /// </summary>
+    private TimeSpan? _duration;
+
+    /// <summary>
+    /// 进度条采用的总秒数。
+    /// </summary>
+    private double _durationSeconds;
+
+    /// <summary>
+    /// 最近显示的整秒进度。
+    /// </summary>
+    private long _displaySecond;
+
+    /// <summary>
+    /// 缓存的进度文本。
+    /// </summary>
+    private string _positionText;
+
+    /// <summary>
+    /// 缓存的总时长文本。
+    /// </summary>
+    private string _durationText;
+
+    /// <summary>
+    /// 缓存的组合时间文本。
+    /// </summary>
+    private string _timeText;
+
+    /// <summary>
     /// 界面请求的音量。
     /// </summary>
     private double _volume;
@@ -37,6 +72,21 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     /// 界面请求的静音状态。
     /// </summary>
     private bool _isMuted;
+
+    /// <summary>
+    /// 最近已通知的播放状态和操作权限。
+    /// </summary>
+    private (PlaybackState State, bool IsDisposed, bool IsLive, bool CanSeek, bool IsSeeking, bool CanChangeSpeed) _publishedState;
+
+    /// <summary>
+    /// 最近已通知的实际倍速和请求状态。
+    /// </summary>
+    private (double Speed, double RequestedSpeed, bool IsSpeedChangePending, string? LastSpeedError) _publishedRate;
+
+    /// <summary>
+    /// 最近已通知的音量和静音状态。
+    /// </summary>
+    private (double Volume, bool IsMuted) _publishedAudio;
 
     /// <summary>
     /// 尚未完成的拖动请求数。
@@ -86,9 +136,19 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
         Dispatcher.UIThread.VerifyAccess();
         Player = player ?? throw new ArgumentNullException(nameof(player));
         _source = player.Source;
-        _positionSeconds = player.Position.TotalSeconds;
+        _publishedPosition = player.Position;
+        _positionSeconds = _publishedPosition.TotalSeconds;
+        _duration = player.Duration;
+        _durationSeconds = Math.Max(1, _duration?.TotalSeconds ?? 1);
+        _displaySecond = _publishedPosition.Ticks / TimeSpan.TicksPerSecond;
+        _positionText = FormatTime(_publishedPosition);
+        _durationText = _duration is { } duration ? FormatTime(duration) : "--:--:--";
+        _timeText = $"{_positionText} / {_durationText}";
         _volume = player.Volume;
         _isMuted = player.IsMuted;
+        _publishedState = (State, IsDisposed, IsLive, CanSeek, IsSeeking, CanChangeSpeed);
+        _publishedRate = (Speed, RequestedSpeed, IsSpeedChangePending, LastSpeedError);
+        _publishedAudio = (Volume, IsMuted);
         player.PlaybackChanged += OnPlaybackChanged;
         player.PositionChanged += OnPositionChanged;
     }
@@ -136,7 +196,7 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     /// <summary>
     /// 核心报告的媒体总时长。
     /// </summary>
-    public TimeSpan? Duration => Player.Duration;
+    public TimeSpan? Duration => _duration;
 
     /// <summary>
     /// 可绑定的进度预览；真实位置从 Player.Position 读取。
@@ -150,7 +210,7 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     /// <summary>
     /// 进度条总时长，未知时使用一秒占位。
     /// </summary>
-    public double DurationSeconds => Math.Max(1, Player.Duration?.TotalSeconds ?? 1);
+    public double DurationSeconds => _durationSeconds;
 
     /// <summary>
     /// 可双向绑定的进度，拖动时立即提交核心 Seek。
@@ -171,17 +231,17 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     /// <summary>
     /// 当前进度的显示文本。
     /// </summary>
-    public string PositionText => FormatTime(TimeSpan.FromSeconds(_positionSeconds));
+    public string PositionText => _positionText;
 
     /// <summary>
     /// 总时长的显示文本。
     /// </summary>
-    public string DurationText => Player.Duration is { } duration ? FormatTime(duration) : "--:--:--";
+    public string DurationText => _durationText;
 
     /// <summary>
     /// 当前进度与总时长的组合文本。
     /// </summary>
-    public string TimeText => $"{PositionText} / {DurationText}";
+    public string TimeText => _timeText;
 
     /// <summary>
     /// 核心提供的倍速权限。
@@ -222,9 +282,9 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     public string? LastSpeedError => Player.LastSpeedError;
 
     /// <summary>
-    /// 当前录制结果，具体数据由核心提供。
+    /// 当前录制诊断；媒体切换时可能为空。
     /// </summary>
-    public PlaybackRecordingDiagnosticInfo Recording => Player.Recording;
+    public PlaybackRecordingDiagnosticInfo? Recording => Player.Recording;
 
     /// <summary>
     /// 当前录制状态。
@@ -308,20 +368,79 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     /// <summary>
     /// 回写实际值，保留尚未完成的拖动与音量预览。
     /// </summary>
-    private void Refresh(bool controlChanged)
+    private void Refresh(bool controlChanged, string? resetProperty = null)
     {
         var sourceChanged = Interlocked.Exchange(ref _mediaOpening, 0) != 0 || !ReferenceEquals(_source, Player.Source);
         _source = Player.Source;
         if (_pendingSeeks == 0 || sourceChanged) _positionSeconds = Player.Position.TotalSeconds;
         if (_pendingVolume == 0) _volume = Player.Volume;
         if (_pendingMute == 0) _isMuted = Player.IsMuted;
-        RaiseProperties(nameof(Position), nameof(Duration), nameof(PositionSeconds), nameof(DurationSeconds), nameof(PositionText), nameof(DurationText), nameof(TimeText));
+        PublishPosition(resetProperty == nameof(PositionSeconds));
         if (!controlChanged && !sourceChanged) return;
         if (sourceChanged) RaiseProperties(nameof(Source));
-        RaiseProperties(nameof(State), nameof(IsPlaying), nameof(IsDisposed), nameof(IsLive), nameof(CanSeek), nameof(IsSeeking),
-            nameof(CanChangeSpeed), nameof(Speed), nameof(RequestedSpeed), nameof(IsSpeedChangePending), nameof(LastSpeedError), nameof(Volume), nameof(IsMuted),
-            nameof(Recording), nameof(RecordingState), nameof(IsRecording));
+        PublishControlState(resetProperty);
         NotifyUpdated(sourceChanged);
+    }
+
+    /// <summary>
+    /// 按组通知控制变化，命令完成后保留绑定回读。
+    /// </summary>
+    private void PublishControlState(string? resetProperty = null)
+    {
+        var state = (State, IsDisposed, IsLive, CanSeek, IsSeeking, CanChangeSpeed);
+        var rate = (Speed, RequestedSpeed, IsSpeedChangePending, LastSpeedError);
+        var audio = (Volume, IsMuted);
+        var previousState = _publishedState;
+        var previousRate = _publishedRate;
+        var previousAudio = _publishedAudio;
+        _publishedState = state;
+        _publishedRate = rate;
+        _publishedAudio = audio;
+
+        if (state != previousState)
+            RaiseProperties(nameof(State), nameof(IsPlaying), nameof(IsDisposed), nameof(IsLive), nameof(CanSeek), nameof(IsSeeking), nameof(CanChangeSpeed));
+        if (rate != previousRate || resetProperty == nameof(Speed))
+            RaiseProperties(nameof(Speed), nameof(RequestedSpeed), nameof(IsSpeedChangePending), nameof(LastSpeedError));
+        if (audio != previousAudio || resetProperty is nameof(Volume) or nameof(IsMuted))
+            RaiseProperties(nameof(Volume), nameof(IsMuted));
+        // 录制快照会查询文件信息，此处只通知，由订阅方按需读取。
+        RaiseProperties(nameof(Recording), nameof(RecordingState), nameof(IsRecording));
+    }
+
+    /// <summary>
+    /// 数值按实际变化通知，显示文本仅在可见时间变化时生成。
+    /// </summary>
+    private void PublishPosition(bool resetPosition = false)
+    {
+        var position = TimeSpan.FromSeconds(_positionSeconds);
+        var positionChanged = position != _publishedPosition;
+        _publishedPosition = position;
+        var duration = Player.Duration;
+        var durationChanged = duration != _duration;
+        _duration = duration;
+        var durationSeconds = Math.Max(1, duration?.TotalSeconds ?? 1);
+        var sliderMaximumChanged = durationSeconds != _durationSeconds;
+        _durationSeconds = durationSeconds;
+        var second = position.Ticks / TimeSpan.TicksPerSecond;
+        var positionTextChanged = second != _displaySecond;
+        _displaySecond = second;
+        if (positionTextChanged) _positionText = FormatTime(position);
+        var durationTextChanged = false;
+        if (durationChanged)
+        {
+            var text = duration is { } value ? FormatTime(value) : "--:--:--";
+            durationTextChanged = text != _durationText;
+            _durationText = text;
+        }
+        var timeTextChanged = positionTextChanged || durationTextChanged;
+        if (timeTextChanged) _timeText = $"{_positionText} / {_durationText}";
+        // 先更新全部缓存，再通知订阅者，避免读到半更新的组合文本。
+        if (positionChanged || resetPosition) RaiseProperties(nameof(Position), nameof(PositionSeconds));
+        if (durationChanged) RaiseProperties(nameof(Duration));
+        if (sliderMaximumChanged) RaiseProperties(nameof(DurationSeconds));
+        if (positionTextChanged) RaiseProperties(nameof(PositionText));
+        if (durationTextChanged) RaiseProperties(nameof(DurationText));
+        if (timeTextChanged) RaiseProperties(nameof(TimeText));
     }
 
     /// <summary>
@@ -330,7 +449,10 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     private async Task ApplySeekAsync(double seconds)
     {
         _pendingSeeks++;
-        RaiseProperties(nameof(Position), nameof(PositionSeconds), nameof(PositionText), nameof(TimeText), nameof(IsSeeking));
+        PublishPosition();
+        var wasSeeking = _publishedState.IsSeeking;
+        _publishedState.IsSeeking = IsSeeking;
+        if (_publishedState.IsSeeking != wasSeeking) RaiseProperties(nameof(IsSeeking));
         NotifyUpdated(false);
         try
         {
@@ -345,7 +467,7 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
             Dispatch(() =>
             {
                 _pendingSeeks--;
-                Refresh(controlChanged: true);
+                Refresh(controlChanged: true, resetProperty: nameof(PositionSeconds));
             });
         }
     }
@@ -369,7 +491,7 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
             {
                 if (propertyName == nameof(Volume)) _pendingVolume--;
                 if (propertyName == nameof(IsMuted)) _pendingMute--;
-                Refresh(controlChanged: true);
+                Refresh(controlChanged: true, resetProperty: propertyName);
             });
         }
     }
@@ -394,12 +516,20 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
         _publishing = true;
         try
         {
+            PropertyChangedEventHandler? subscription = null;
+            var handlers = Array.Empty<Delegate>();
             foreach (var name in names)
             {
                 if (_disposed) return;
+                var current = PropertyChanged;
+                if (current is null) continue;
+                if (!ReferenceEquals(subscription, current))
+                {
+                    subscription = current;
+                    handlers = current.GetInvocationList();
+                }
                 var args = PropertyArgs.GetOrAdd(name, static value => new PropertyChangedEventArgs(value));
-                if (PropertyChanged is null) continue;
-                foreach (PropertyChangedEventHandler handler in PropertyChanged.GetInvocationList())
+                foreach (PropertyChangedEventHandler handler in handlers)
                 {
                     try { handler(this, args); }
                     catch (Exception exception) { LogFailure(name, exception.Message, exception); }

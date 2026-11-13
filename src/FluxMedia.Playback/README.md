@@ -55,6 +55,10 @@ Applications using values outside this range must configure the bounds in `FluxE
 
 ## Notes
 
+- Network timeouts use `PlaybackOptions.Network.OpenTimeout` and `ReadTimeout` directly (6s/4s by default; Compatible uses 12s/8s).
+  `NetworkTimeout`, `Mode`, and `NetworkPlaybackMode` were removed. Presets provide explicit parameter values.
+  `FFmpegReconnectDelayMax` configures HTTP(S) native reconnect backoff in seconds; `ReconnectDelay` is the core retry interval as a TimeSpan.
+  Both default to two seconds and are independent. Invalid network timings are rejected before replacing the current media.
 - Player exposes read-only playback values and async commands. It does not capture a UI synchronization context,
   implement INotifyPropertyChanged, or format display time strings. Core events run on the triggering thread.
   Avalonia controls manage PlayerBinding for UI notifications and two-way binding; headless callers use Player directly.
@@ -72,3 +76,13 @@ Applications using values outside this range must configure the bounds in `FluxE
 binding. `FFmpegLibraries.IsAvailable(directory)` checks file presence without
 loading native code. The binding package version is configured once through
 `FFmpegAutoGenVersion` in `Directory.Build.props`.
+
+## Diagnostics
+
+Diagnostic models and query implementations live in `Diagnostics`, alongside `Internal`.
+Playback control uses its own clock, seek state and recording result; it does not consume diagnostic snapshots.
+Unprovided counters, phase durations, hardware execution details, lifecycle and trace fields/types have been removed.
+Queries validate existing pipeline, media, options and operation identities without waiting for the playback command gate.
+`GetDiagnosticInfo()`, `GetRecordingDiagnosticInfo()` and `Player.Recording` can return null during transitions or unstable reads.
+Use the snapshot's `State` and `IsSpeedChangePending` when displaying it. Remaining nullable members indicate unavailable facts.
+Callers must update removed-member access and null handling. Recording file metadata is read only by the explicit recording diagnostic API.

@@ -1,10 +1,7 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
-
 namespace FluxMedia.Playback.Internal;
 
 /// <summary>
-/// 合并跳转请求、绑定请求生命周期，并维护跳转诊断。
+/// 合并跳转请求，并独立维护执行与自适应策略。
 /// </summary>
 internal sealed class PlaybackSeekController : IAsyncDisposable
 {
@@ -13,68 +10,35 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     /// </summary>
     private static readonly TimeSpan SeekCoalesceDelay = TimeSpan.FromMilliseconds(33);
 
-
     /// <summary>
     /// 最小跳转合并延迟。
     /// </summary>
     private static readonly TimeSpan MinSeekCoalesceDelay = TimeSpan.FromMilliseconds(16);
-
 
     /// <summary>
     /// 最大跳转合并延迟。
     /// </summary>
     private static readonly TimeSpan MaxSeekCoalesceDelay = TimeSpan.FromMilliseconds(66);
 
-
     /// <summary>
     /// 慢速解复用跳转阈值。
     /// </summary>
     private static readonly TimeSpan SlowDemuxSeekThreshold = TimeSpan.FromMilliseconds(350);
-
 
     /// <summary>
     /// 慢速首次界面跳转阈值。
     /// </summary>
     private static readonly TimeSpan SlowFirstUiSeekThreshold = TimeSpan.FromMilliseconds(500);
 
-
-    /// <summary>
-    /// 跳转跟踪容量。
-    /// </summary>
-    private const int SeekTraceCapacity = 48;
-
-
-    /// <summary>
-    /// 保护跳转跟踪记录的锁。
-    /// </summary>
-    private readonly object _seekTraceLock = new();
-
-
-    /// <summary>
-    /// 按时间保存的近期跳转阶段记录。
-    /// </summary>
-    private readonly Queue<PlaybackSeekTraceEntry> _seekTrace = new();
-
-
     /// <summary>
     /// 当前跳转合并等待时间（时钟刻度）。
     /// </summary>
     private long _adaptiveSeekCoalesceDelayTicks = SeekCoalesceDelay.Ticks;
 
-
-    /// <summary>
-    /// 当前自适应跳转合并策略的名称。
-    /// </summary>
-    private string _seekStrategy = "Balanced";
-
     /// <summary>
     /// 保护待执行请求及处理任务。
     /// </summary>
     private readonly object _sync = new();
-    /// <summary>
-    /// 所属播放会话标识。
-    /// </summary>
-    private readonly Guid _instanceId;
     /// <summary>
     /// 会话提供的实际跳转动作。
     /// </summary>
@@ -104,24 +68,24 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     /// </summary>
     private bool _disposed;
     /// <summary>
-    /// 当前跳转诊断快照。
+    /// 当前执行与合并策略所需的状态。
     /// </summary>
-    public PlaybackSeekDiagnosticInfo Diagnostic { get; set; } = new();
+    private PlaybackSeekState _operation = new();
+
     /// <summary>
-    /// 当前合并策略名称。
+    /// 在请求锁内读取当前执行状态。
     /// </summary>
-    public string Strategy => _seekStrategy;
+    public PlaybackSeekState Operation { get { lock (_sync) return _operation; } }
     /// <summary>
     /// 下一次合并等待时间。
     /// </summary>
     public TimeSpan CoalesceDelay => GetAdaptiveSeekCoalesceDelay();
 
     /// <summary>
-    /// 绑定会话标识与实际跳转动作。
+    /// 绑定实际跳转动作。
     /// </summary>
-    public PlaybackSeekController(Guid instanceId, Func<TimeSpan, bool, CancellationToken, Task<PlaybackResult>> execute)
+    public PlaybackSeekController(Func<TimeSpan, bool, CancellationToken, Task<PlaybackResult>> execute)
     {
-        _instanceId = instanceId;
         _execute = execute;
     }
     /// <summary>
@@ -139,22 +103,12 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
             var completion = _pendingCompletion.Task;
             if (!_executing)
             {
-                Diagnostic = Diagnostic with
+                _operation = new PlaybackSeekState
                 {
                     RequestId = request.Id,
-                    RequestedPosition = target,
-                    InProgress = true,
                     CoalescedRequestCount = request.Count,
-                    Strategy = Strategy,
-                    NextCoalesceDelay = CoalesceDelay,
-                    StartedAt = request.FirstQueuedAt,
-                    CompletedAt = null,
-                    TotalElapsed = null,
-                    FirstUiFrameElapsed = null,
-                    LastError = null
                 };
             }
-            Trace(request.Id, "Queued", $"Target={target} Coalesced={request.Count}", target);
             _processing ??= Task.Run(ProcessAsync);
             return completion;
         }
@@ -182,27 +136,16 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
                 _pending = null;
                 _pendingCompletion = null;
                 _executing = true;
-                Diagnostic = Diagnostic with
+                _operation = new PlaybackSeekState
                 {
                     RequestId = request.Id,
-                    RequestedPosition = request.Target,
-                    InProgress = true,
                     CoalescedRequestCount = request.Count,
-                    Strategy = Strategy,
-                    NextCoalesceDelay = CoalesceDelay,
-                    StartedAt = request.FirstQueuedAt,
-                    CompletedAt = null,
-                    TotalElapsed = null,
-                    FirstUiFrameElapsed = null,
-                    LastError = null,
-                    CoalesceElapsed = DateTimeOffset.UtcNow - request.FirstQueuedAt
                 };
             }
             lastStartedAt = DateTimeOffset.UtcNow;
             try
             {
                 request.Token.ThrowIfCancellationRequested();
-                Trace(request.Id, "CoalescedExecute", $"Target={request.Target} Count={request.Count}", request.Target, Diagnostic.CoalesceElapsed);
                 completion.TrySetResult(await _execute(request.Target, request.ResumePlaying, request.Token).ConfigureAwait(false));
             }
             catch (OperationCanceledException) { completion.TrySetCanceled(); }
@@ -224,22 +167,19 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
             else _pendingCompletion?.TrySetException(exception);
             _pendingCompletion = null;
             _pending = null;
-            Diagnostic = Diagnostic with { InProgress = false, CompletedAt = DateTimeOffset.UtcNow, LastError = exception.Message };
         }
     }
 
     /// <summary>
-    /// 新媒体使用独立的合并策略和诊断起点。
+    /// 新媒体重新开始请求合并。
     /// </summary>
     public void Reset()
     {
         lock (_sync)
         {
             CancelPending(new OperationCanceledException());
-            Diagnostic = new PlaybackSeekDiagnosticInfo();
+            _operation = new PlaybackSeekState();
             Interlocked.Exchange(ref _adaptiveSeekCoalesceDelayTicks, SeekCoalesceDelay.Ticks);
-            _seekStrategy = "Balanced";
-            ClearTrace();
         }
     }
     /// <summary>
@@ -258,6 +198,60 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     }
 
     /// <summary>
+    /// 开始执行当前请求，重置恢复和调度依据。
+    /// </summary>
+    public void Begin()
+    {
+        lock (_sync)
+            _operation = _operation with
+            {
+                Path = PlaybackSeekPath.None,
+                DemuxerSeekElapsed = null,
+                TotalElapsed = null,
+                FirstFrameElapsed = null,
+                RecoveryAttempted = false
+            };
+    }
+
+    /// <summary>
+    /// 保存实际执行路径和自适应策略需要的定位耗时。
+    /// </summary>
+    public void SetPath(PlaybackSeekPath path, TimeSpan? elapsed)
+    {
+        lock (_sync) _operation = _operation with { Path = path, DemuxerSeekElapsed = elapsed };
+    }
+
+    /// <summary>
+    /// 只接收当前请求的首帧，避免覆盖后续请求。
+    /// </summary>
+    public void RecordFirstFrame(long requestId, TimeSpan elapsed)
+    {
+        lock (_sync)
+            if (_operation.RequestId == requestId)
+                _operation = _operation with { FirstFrameElapsed = elapsed };
+    }
+
+    /// <summary>
+    /// 记录首帧恢复，供后续合并策略退避。
+    /// </summary>
+    public void MarkRecoveryAttempted()
+    {
+        lock (_sync) _operation = _operation with { RecoveryAttempted = true };
+    }
+
+    /// <summary>
+    /// 使用本次执行耗时更新下一次合并间隔。
+    /// </summary>
+    public void Complete(TimeSpan elapsed)
+    {
+        lock (_sync)
+        {
+            _operation = _operation with { TotalElapsed = elapsed };
+            UpdateStrategy(_operation);
+        }
+    }
+
+    /// <summary>
     /// 读取当前自适应跳转合并间隔。
     /// </summary>
     private TimeSpan GetAdaptiveSeekCoalesceDelay()
@@ -265,88 +259,32 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
         return TimeSpan.FromTicks(Interlocked.Read(ref _adaptiveSeekCoalesceDelayTicks));
     }
 
-
     /// <summary>
     /// 根据跳转耗时调整后续合并策略。
     /// </summary>
-    public void UpdateStrategy(PlaybackSeekDiagnosticInfo seek)
+    private void UpdateStrategy(PlaybackSeekState seek)
     {
         var next = GetAdaptiveSeekCoalesceDelay();
-        var strategy = "Balanced";
         var slowDemux = seek.DemuxerSeekElapsed >= SlowDemuxSeekThreshold;
-        var slowFirstUi = seek.FirstUiFrameElapsed >= SlowFirstUiSeekThreshold;
+        var slowFirstUi = seek.FirstFrameElapsed >= SlowFirstUiSeekThreshold;
         var heavyDrag = seek.CoalescedRequestCount >= 4;
-        var fullRestart = string.Equals(seek.Path, "FullRestart", StringComparison.OrdinalIgnoreCase);
-        var recovered = seek.FirstUiRecoveryAttempted;
+        var fullRestart = seek.Path == PlaybackSeekPath.FullRestart;
+        var recovered = seek.RecoveryAttempted;
 
         if (heavyDrag)
         {
             next = MinSeekCoalesceDelay;
-            strategy = "DragPreview";
         }
         else if (slowDemux || slowFirstUi || fullRestart || recovered)
         {
             next = TimeSpan.FromMilliseconds(Math.Min(MaxSeekCoalesceDelay.TotalMilliseconds, next.TotalMilliseconds + 20));
-            strategy = slowFirstUi ? "FirstUiRecovery" : slowDemux ? "DemuxBackoff" : recovered ? "RecoveryBackoff" : "FullRestartBackoff";
         }
-        else if (string.Equals(seek.Path, "Demuxer", StringComparison.OrdinalIgnoreCase) && seek.CoalescedRequestCount <= 1 && seek.TotalElapsed <= TimeSpan.FromMilliseconds(180))
+        else if (seek.Path == PlaybackSeekPath.Demuxer && seek.CoalescedRequestCount <= 1 && seek.TotalElapsed <= TimeSpan.FromMilliseconds(180))
         {
             next = TimeSpan.FromMilliseconds(Math.Max(MinSeekCoalesceDelay.TotalMilliseconds, next.TotalMilliseconds - 10));
-            strategy = "Responsive";
         }
 
         Interlocked.Exchange(ref _adaptiveSeekCoalesceDelayTicks, next.Ticks);
-        _seekStrategy = strategy;
-        Diagnostic = Diagnostic with
-        {
-            Strategy = strategy,
-            NextCoalesceDelay = next
-        };
-        Trace(seek.RequestId, "Strategy", $"Strategy={strategy} NextCoalesce={next}", seek.ActualPosition);
-        FluxMediaLog.Write(LogLevel.Information, nameof(PlaybackSeekController), _instanceId, $"Event=SeekStrategyUpdated Strategy={strategy} NextCoalesce={next} Path={seek.Path ?? "-"} Coalesced={seek.CoalescedRequestCount} Demux={seek.DemuxerSeekElapsed?.ToString() ?? "-"} FirstUI={seek.FirstUiFrameElapsed?.ToString() ?? "-"} Total={seek.TotalElapsed?.ToString() ?? "-"}");
-    }
-
-
-    /// <summary>
-    /// 追加一条跳转阶段跟踪记录。
-    /// </summary>
-    public void Trace(long requestId, string phase, string message, TimeSpan? position = null, TimeSpan? elapsed = null)
-    {
-        var entry = new PlaybackSeekTraceEntry(DateTimeOffset.UtcNow, requestId, phase, message, position, elapsed);
-        lock (_seekTraceLock)
-        {
-            _seekTrace.Enqueue(entry);
-            while (_seekTrace.Count > SeekTraceCapacity)
-            {
-                _seekTrace.Dequeue();
-            }
-        }
-
-        FluxMediaLog.Write(LogLevel.Information, nameof(PlaybackSeekController), _instanceId, $"Event=SeekTrace RequestId={requestId} Phase={phase} Position={position?.ToString() ?? "-"} Elapsed={elapsed?.ToString() ?? "-"} Message={message}");
-    }
-
-
-    /// <summary>
-    /// 复制当前跳转跟踪记录供诊断读取。
-    /// </summary>
-    public IReadOnlyList<PlaybackSeekTraceEntry> Snapshot()
-    {
-        lock (_seekTraceLock)
-        {
-            return _seekTrace.ToArray();
-        }
-    }
-
-
-    /// <summary>
-    /// 清空跳转跟踪记录。
-    /// </summary>
-    public void ClearTrace()
-    {
-        lock (_seekTraceLock)
-        {
-            _seekTrace.Clear();
-        }
     }
 
 }
