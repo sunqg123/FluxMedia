@@ -16,5 +16,8 @@ public sealed class FluxMediaException : Exception
     /// <summary>
     /// 错误。
     /// </summary>
-    public FluxMediaError Error { get; }
+    public FluxMediaError Error
+    {
+        get;
+    }
 }

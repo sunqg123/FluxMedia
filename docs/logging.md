@@ -1,53 +1,57 @@
-# 静态日志
+# 日志
 
-日志实现统一位于 `src/FluxMedia.Playback/Logging`，业务组件不注入日志接口。
-入口为 `FluxMedia.Core.Logging.FluxMediaLog`。
+日志直接使用 `LogConverge.Sharp.Log`，不再维护单独的日志配置、队列、输出端和格式化实现。
 
-## 配置
+## 初始化
 
 ```csharp
 using FluxMedia.Playback;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 
 FluxEngine.Start(new FluxEngineOptions
 {
     FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
     EnableLogging = true
 });
-FluxMediaLog.Info("Application", "播放器已启动");
+Log.Info("Application", "播放器已启动");
 ```
 
-引擎通过 `EnableLogging` 控制日志，默认关闭。开启后使用程序输出目录下的 Logs 和默认日志级别，不需要传入目录。
-Avalonia 示例显式开启日志。
-实际文件路径由 FluxMediaLog.CurrentLogFilePath 或 FluxEngine.CurrentLogFilePath 读取。
+`EnableLogging` 默认关闭。`Start` 调用 `Log.Initialize`，默认目录为
+`Path.Combine(AppContext.BaseDirectory, "Logs")`。返回 `Ok` 或 `AlreadyInitialized`
+才继续初始化 FFmpeg，其余结果直接抛出初始化异常。
 
-宿主也可使用 Configure、UseFile、UseConsole 或 SetSink 设置自己的目标。
-宿主替换输出后，引擎关闭不会误关新的宿主目标。宿主自行配置时负责退出清理。
-文件输出使用队列并周期写入；切换输出、回调异常和关闭由日志目标生命周期处理。
+日志配置是进程级的，以首次成功初始化为准，关闭模式也属于初始化。
+宿主如需自定义目录，应在 `FluxEngine.Start` 前自行调用 `Log.Initialize(directory, enabled)`
+并检查结果；引擎会沿用已有实例。运行期间或引擎重新启动时，不会切换目录或开关。
+FFmpeg 初始化失败也不会销毁共享日志，修正 FFmpeg 配置后可重试。
 
-## 输出格式
+`FluxEngine.Shutdown` 只关闭播放资源，不销毁宿主可能共用的日志。
+日志包在正常进程退出时自动排空并释放；强制终止或崩溃不能保证最后的记录落盘。
+文件名、滚动、格式和后台刷新均由 LogConverge 负责。
 
-文件和控制台使用相同的日志头：
+当前依赖版本为 `0.7.0`，随包提供 Windows x64 原生日志库，启用时自动加载，
+不需要另行复制 DLL。其他平台可关闭日志使用播放核心；开启日志时若平台不受支持，
+`Start` 会因日志初始化失败抛出异常。
 
-```text
-yyyy-MM-dd HH:mm:ss.fff [级别] [模块] SessionId=播放器标识 ThreadId=线程标识 Event=事件 参数...
-```
+## 记录范围
 
-`Trace`、`Debug`、`Info`、`Warning`、`Error`、`Critical` 分别显示，不合并级别。
-没有播放器标识时，`SessionId` 显示为 `-`。
+- 引擎启动、关闭、FFmpeg 就绪和媒体打开。
+- 录制开始、完成和失败。
+- 网络重连尝试及恢复，硬件或显示路径的关键回退。
+- 最终播放故障、订阅回调异常，以及无法继续向上抛出的清理错误。
 
-以 `Event=` 开头的消息保留事件及参数；普通说明写入 `Event=Message Message="..."`，不从标点猜测事件名。
-消息中的换行和制表符转义为 `\r`、`\n`、`\t`，避免一条事件被拆成多条日志。
-异常类型、内部异常和完整堆栈在下一行缩进显示，不再重复拼接异常说明。
+不再记录每次状态切换、Seek 提交或成功定位、逐个动态库加载、录制分段、
+每帧显示或逐帧转换失败。同一条异常优先由最终处理边界记录；被恢复的设备错误仍保留记录。
+播放器相关消息携带 `SessionId`，事件使用 `Event=...`，具体日志头由 LogConverge 格式化。
+诊断只按需读取已有状态，见 [诊断边界](diagnostics.md)。
 
-播放控件的失败日志包含 `Operation`，可区分播放/暂停、停止、快进和后退。
-宿主通过 `SetSink` 接管日志时，仍接收原始参数，可自行决定输出格式。
+## 调用方迁移
 
-## 播放错误与诊断
+将原 `FluxMediaLog` 调用替换为 `Log.Info`、`Log.Warning`、`Log.Error` 等直接调用。
+需要为警告附带异常时，使用 `Log.Write(LogLevel.Warning, category, message, exception)`。
+`Write` 返回日志结果，不将写入失败抛到播放流程。
 
-正常播放保留必要的拒绝、故障、回退和清理错误日志。
-核心不再维护 SeekTrace、首包跟踪、阶段耗时日志或健康轮询日志。
-Sample 的绑定提交日志和 Avalonia 显示日志由各自项目决定，不作为核心播放控制的输入。
-
-诊断只读取已有状态；缺失指标不靠额外日志或正常流程统计补齐，详见 [诊断边界](diagnostics.md)。
-读取或分享日志时应过滤源认证信息，原始运行日志不提交到 Git。
+原 `LoggingOptions`、`LogFileRollingMode`、自有 `LogLevel`、日志输出端和
+`FluxEngine.LogDirectory/CurrentLogFilePath` 已移除，不提供兼容转发。
+目录由首次 `Log.Initialize` 的调用方掌握，文件命名遵循日志包规则。
+日志可能包含路径及异常详情，分享前请过滤认证信息；原始运行日志不提交到 Git。

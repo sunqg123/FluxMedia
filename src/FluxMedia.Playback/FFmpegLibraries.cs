@@ -47,9 +47,12 @@ public static class FFmpegLibraries
     /// </summary>
     private static string GetFileName(string library, int major)
     {
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows)) return $"{library}-{major}.dll";
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux)) return $"lib{library}.so.{major}";
-        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX)) return $"lib{library}.{major}.dylib";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return $"{library}-{major}.dll";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+            return $"lib{library}.so.{major}";
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+            return $"lib{library}.{major}.dylib";
         throw new PlatformNotSupportedException("FFmpeg 库加载仅支持 Windows、Linux 和 macOS。");
     }
 

@@ -1,5 +1,5 @@
-using System.Threading.Channels;
 using FluxMedia.FFmpeg.Pipeline;
+using System.Threading.Channels;
 
 namespace FluxMedia.Playback.Internal;
 
@@ -21,15 +21,24 @@ internal sealed class FFmpegPacketInput
     /// <summary>
     /// 解码所需的流参数。
     /// </summary>
-    public FFmpegStreamDescriptor Stream { get; }
+    public FFmpegStreamDescriptor Stream
+    {
+        get;
+    }
 
     /// <summary>
     /// 数据包读取入口。
     /// </summary>
-    public ChannelReader<FFmpegPacketLease> Packets { get; }
+    public ChannelReader<FFmpegPacketLease> Packets
+    {
+        get;
+    }
 
     /// <summary>
     /// 读取当前包代次。
     /// </summary>
-    public Func<long> PacketGeneration { get; }
+    public Func<long> PacketGeneration
+    {
+        get;
+    }
 }

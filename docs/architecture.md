@@ -35,7 +35,7 @@ Avalonia 的 Bindings/PlayerBinding 处理双向绑定与进度预览，控件�
 独立类型以类型名分别存放；较大的私有辅助类型通过 `partial` 分文件，保留原有嵌套作用域。
 
 会话的按需诊断投影集中在 [PlaybackSession.Diagnostics.cs](../src/FluxMedia.Playback/Diagnostics/PlaybackSession.Diagnostics.cs)。
-解复用器的录制关联、预录包缓存与异步收尾集中在 [FFmpegSharedDemuxer.Recording.cs](../src/FluxMedia.Playback/Internal/Demuxing/FFmpegSharedDemuxer.Recording.cs)。
+解复用器的录制借用关系与预录包缓存集中在 [FFmpegSharedDemuxer.Recording.cs](../src/FluxMedia.Playback/Internal/Demuxing/FFmpegSharedDemuxer.Recording.cs)；录制控制器持有录制器，写入线程负责容器收尾。
 两者均为原类型的 `partial` 文件。诊断部分只读取正常播放已有的事实，不维护控制状态。
 
 | 目录 | 职责 |
@@ -54,7 +54,7 @@ Avalonia 的 Bindings/PlayerBinding 处理双向绑定与进度预览，控件�
 | [Hardware](../src/FluxMedia.Playback/Internal/Hardware) | 硬件视频上下文 |
 | [Diagnostics](../src/FluxMedia.Playback/Diagnostics) | 按需读取已有事实，存放诊断模型与查询实现 |
 
-配置、公开业务数据和日志分别位于 `Configuration`、`Models`、`Logging`；诊断类型与读取实现统一位于同级 `Diagnostics`。
+配置与公开业务数据分别位于 `Configuration`、`Models`；诊断类型与读取实现统一位于同级 `Diagnostics`。日志直接使用 LogConverge.Sharp。
 Avalonia 显示位于独立的 `FluxMedia.Avalonia` 项目，自定义 UI 可直接使用核心帧输出。
 
 媒体源规则集中在 `Demuxing/MediaSourcePolicy`：公开字符串入口调用地址解析，
@@ -105,14 +105,16 @@ Seek 实际位置来自本代首个有效输出帧，原生定位完成只表示
 VideoFrame.Retain 保留帧租约，消费方负责释放。异步显示前可再次检查 IsCurrent。
 TimelineId 关联核心回调和显示提交；显示提交不等于物理屏幕扫描时刻。
 Windows 显示实现包含 CPU 位图与 D3D11 共享纹理路径，其它平台需分别确认。
-录制复用压缩包，控制器跨管线保管录制意图；不负责修复上游码流损坏。
-停止录制通过异步等待完成排空、封装和释放，再解除录制器关联。
+录制复用压缩包，控制器是录制器的唯一所有者，解复用器仅借用它投包；不负责修复上游码流损坏。
+停止录制先解除投包关联，再异步等待写入线程排空、封装和释放。
+队列满、包复制或容器写入失败会终止本次录制，最终结果保留失败；失败实例释放后可重新开始。
+录制终态通过控制器转发到 Player.PlaybackChanged，不依赖诊断查询或播放进度；通知在写入线程之外执行。
 接受停止前允许取消，开始收尾后以最终封装结果为准。
 录制分别判断封装、关闭和有效数据，文件信息查询不参与判定录制成败。
 
 ## 日志与依赖
 
-Logging 目录提供 FluxMediaLog 静态入口及内部输出端。
+日志直接使用 LogConverge.Sharp.Log，在 FluxEngine.Start 初始化；输出和进程退出清理由日志包管理。
 FFmpegLibraries 从绑定常量生成平台库名，并检查完整目录及实际 ABI。
 任意主版本支持尚未实现，直接原生结构布局仍是限制，见 [部署说明](ffmpeg-deployment.md)。
 Shared 中的 IsExternalInit 是 netstandard2.1 的 record/init 编译标记，不是业务兼容层。

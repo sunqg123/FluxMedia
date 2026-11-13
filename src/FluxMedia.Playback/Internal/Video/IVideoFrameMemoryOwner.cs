@@ -8,5 +8,8 @@ internal interface IVideoFrameMemoryOwner : IVideoFrameOwner
     /// <summary>
     /// 内存。
     /// </summary>
-    Memory<byte> Memory { get; }
+    Memory<byte> Memory
+    {
+        get;
+    }
 }

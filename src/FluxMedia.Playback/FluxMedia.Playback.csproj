@@ -36,6 +36,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FFmpeg.AutoGen" Version="$(FFmpegAutoGenVersion)" />
+    <PackageReference Include="LogConverge.Sharp" Version="0.7.0" />
     <PackageReference Include="NAudio.Core" Version="2.2.1" />
     <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
     <PackageReference Include="Silk.NET.Direct3D11" Version="2.23.0" />

@@ -26,7 +26,10 @@ internal sealed class NullAudioOutputDevice : IAudioOutputDevice
     /// <summary>
     /// 最近错误。
     /// </summary>
-    public string? LastError { get; }
+    public string? LastError
+    {
+        get;
+    }
 
     /// <summary>
     /// 当前运行状态。

@@ -100,8 +100,10 @@ internal sealed unsafe class PlaybackInterruptContext : IDisposable
     /// </summary>
     public bool ShouldInterrupt()
     {
-        if (_cancellationToken.IsCancellationRequested || TimedOut) return true;
-        if (Volatile.Read(ref _readInterruptRequested)?.Invoke() != true) return false;
+        if (_cancellationToken.IsCancellationRequested || TimedOut)
+            return true;
+        if (Volatile.Read(ref _readInterruptRequested)?.Invoke() != true)
+            return false;
         _readInterrupted = true;
         return true;
     }

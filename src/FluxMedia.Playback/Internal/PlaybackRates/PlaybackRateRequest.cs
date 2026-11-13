@@ -18,27 +18,42 @@ internal sealed class PlaybackRateRequest
     /// <summary>
     /// 请求编号。
     /// </summary>
-    public long Id { get; }
+    public long Id
+    {
+        get;
+    }
 
     /// <summary>
     /// 目标倍速。
     /// </summary>
-    public double Rate { get; }
+    public double Rate
+    {
+        get;
+    }
 
     /// <summary>
     /// 已检查的滤镜计划。
     /// </summary>
-    public double[] Stages { get; }
+    public double[] Stages
+    {
+        get;
+    }
 
     /// <summary>
     /// 由协调器短锁保护的状态。
     /// </summary>
-    public PlaybackRateRequestState State { get; set; }
+    public PlaybackRateRequestState State
+    {
+        get; set;
+    }
 
     /// <summary>
     /// 已返回接受，等待恢复或启动，不再使用调用超时。
     /// </summary>
-    public bool Deferred { get; set; }
+    public bool Deferred
+    {
+        get; set;
+    }
 
     /// <summary>
     /// 调用结果，可以先返回 Accepted。

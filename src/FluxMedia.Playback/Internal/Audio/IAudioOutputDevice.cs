@@ -8,22 +8,34 @@ internal interface IAudioOutputDevice : IDisposable
     /// <summary>
     /// 是否可用。
     /// </summary>
-    bool IsAvailable { get; }
+    bool IsAvailable
+    {
+        get;
+    }
 
     /// <summary>
     /// 后端名称。
     /// </summary>
-    string BackendName { get; }
+    string BackendName
+    {
+        get;
+    }
 
     /// <summary>
     /// 最近错误。
     /// </summary>
-    string? LastError { get; }
+    string? LastError
+    {
+        get;
+    }
 
     /// <summary>
     /// 当前运行状态。
     /// </summary>
-    AudioOutputState State { get; }
+    AudioOutputState State
+    {
+        get;
+    }
 
     /// <summary>
     /// 按采样率和声道数初始化 PCM 音频输出。

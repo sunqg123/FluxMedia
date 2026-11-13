@@ -12,6 +12,14 @@ Version: 9.0.1.1
 License file: licenses/FFmpeg.AutoGen-LICENSE.txt
 Project: https://github.com/Ruslan-B/FFmpeg.AutoGen
 
+LogConverge.Sharp
+-----------------
+Version: 0.7.0
+License: MIT
+Project: https://github.com/sunqg123/LogConverge
+The dependency embeds its Windows x64 native logger and includes its own
+third-party notices and licenses. FluxMedia does not copy those binaries.
+
 NAudio
 ------
 Version: 2.2.1

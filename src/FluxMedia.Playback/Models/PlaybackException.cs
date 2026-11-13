@@ -19,10 +19,16 @@ public sealed class PlaybackException : Exception
     /// <summary>
     /// 播放错误。
     /// </summary>
-    public PlaybackError PlaybackError { get; }
+    public PlaybackError PlaybackError
+    {
+        get;
+    }
 
     /// <summary>
     /// 错误。
     /// </summary>
-    public FluxMediaError Error { get; }
+    public FluxMediaError Error
+    {
+        get;
+    }
 }

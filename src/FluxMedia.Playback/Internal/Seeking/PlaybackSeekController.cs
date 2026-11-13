@@ -75,7 +75,14 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     /// <summary>
     /// 在请求锁内读取当前执行状态。
     /// </summary>
-    public PlaybackSeekState Operation { get { lock (_sync) return _operation; } }
+    public PlaybackSeekState Operation
+    {
+        get
+        {
+            lock (_sync)
+                return _operation;
+        }
+    }
     /// <summary>
     /// 下一次合并等待时间。
     /// </summary>
@@ -96,7 +103,8 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
         operationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(PlaybackSeekController));
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(PlaybackSeekController));
             var request = new SeekRequest(target, resumePlaying, ++_nextId, _pending?.FirstQueuedAt ?? DateTimeOffset.UtcNow, (_pending?.Count ?? 0) + 1, operationToken);
             _pending = request;
             _pendingCompletion ??= new TaskCompletionSource<PlaybackResult>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -125,12 +133,17 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
             var delay = lastStartedAt.HasValue
                 ? CoalesceDelay - (DateTimeOffset.UtcNow - lastStartedAt.Value)
                 : CoalesceDelay;
-            if (delay > TimeSpan.Zero) await Task.Delay(delay).ConfigureAwait(false);
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay).ConfigureAwait(false);
             SeekRequest request;
             TaskCompletionSource<PlaybackResult> completion;
             lock (_sync)
             {
-                if (_pending is null) { _processing = null; return; }
+                if (_pending is null)
+                {
+                    _processing = null;
+                    return;
+                }
                 request = _pending;
                 completion = _pendingCompletion!;
                 _pending = null;
@@ -152,7 +165,8 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
             catch (Exception exception) { completion.TrySetException(exception); }
             finally
             {
-                lock (_sync) _executing = false;
+                lock (_sync)
+                    _executing = false;
             }
         }
     }
@@ -163,8 +177,10 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     {
         lock (_sync)
         {
-            if (exception is OperationCanceledException) _pendingCompletion?.TrySetCanceled();
-            else _pendingCompletion?.TrySetException(exception);
+            if (exception is OperationCanceledException)
+                _pendingCompletion?.TrySetCanceled();
+            else
+                _pendingCompletion?.TrySetException(exception);
             _pendingCompletion = null;
             _pending = null;
         }
@@ -194,7 +210,8 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
             CancelPending(new OperationCanceledException());
             processing = _processing;
         }
-        if (processing is not null) await processing.ConfigureAwait(false);
+        if (processing is not null)
+            await processing.ConfigureAwait(false);
     }
 
     /// <summary>
@@ -218,7 +235,12 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     /// </summary>
     public void SetPath(PlaybackSeekPath path, TimeSpan? elapsed)
     {
-        lock (_sync) _operation = _operation with { Path = path, DemuxerSeekElapsed = elapsed };
+        lock (_sync)
+            _operation = _operation with
+            {
+                Path = path,
+                DemuxerSeekElapsed = elapsed
+            };
     }
 
     /// <summary>
@@ -228,7 +250,10 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     {
         lock (_sync)
             if (_operation.RequestId == requestId)
-                _operation = _operation with { FirstFrameElapsed = elapsed };
+                _operation = _operation with
+                {
+                    FirstFrameElapsed = elapsed
+                };
     }
 
     /// <summary>
@@ -236,7 +261,11 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     /// </summary>
     public void MarkRecoveryAttempted()
     {
-        lock (_sync) _operation = _operation with { RecoveryAttempted = true };
+        lock (_sync)
+            _operation = _operation with
+            {
+                RecoveryAttempted = true
+            };
     }
 
     /// <summary>
@@ -246,7 +275,10 @@ internal sealed class PlaybackSeekController : IAsyncDisposable
     {
         lock (_sync)
         {
-            _operation = _operation with { TotalElapsed = elapsed };
+            _operation = _operation with
+            {
+                TotalElapsed = elapsed
+            };
             UpdateStrategy(_operation);
         }
     }

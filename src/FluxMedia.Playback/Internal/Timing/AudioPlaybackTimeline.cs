@@ -39,7 +39,8 @@ internal sealed class AudioPlaybackTimeline
     /// </summary>
     public void Start(TimeSpan position, double rate)
     {
-        if (_segments.Count != 0) return;
+        if (_segments.Count != 0)
+            return;
         _mediaSeconds = position.TotalSeconds;
         _lastRate = rate;
         _segments.AddLast((0, _mediaSeconds, rate));
@@ -66,7 +67,8 @@ internal sealed class AudioPlaybackTimeline
     public TimeSpan? GetPosition(TimeSpan pending, out double rate)
     {
         rate = 1;
-        if (_segments.Count == 0) return null;
+        if (_segments.Count == 0)
+            return null;
         var played = Math.Max(0, _writtenSeconds - pending.TotalSeconds);
         while (_segments.First?.Next is { } next && next.Value.WallStart <= played)
         {

@@ -2,7 +2,6 @@ using Silk.NET.Core;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D11;
 using Silk.NET.DXGI;
-using System.Collections.Concurrent;
 using static Silk.NET.Core.Native.SilkMarshal;
 using D3DDevice = Silk.NET.Direct3D11.ID3D11Device;
 using D3DDeviceContext = Silk.NET.Direct3D11.ID3D11DeviceContext;
@@ -55,7 +54,12 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     /// <summary>
     /// 可用。
     /// </summary>
-    private readonly ConcurrentQueue<D3D11SharedSurface> _available = new();
+    private readonly Queue<D3D11SharedSurface> _available = new();
+
+    /// <summary>
+    /// 归还和销毁必须原子完成，避免资源在销毁后入池。
+    /// </summary>
+    private readonly object _surfaceSync = new();
 
     /// <summary>
     /// 宽度。
@@ -79,32 +83,40 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     {
         _device = device;
         _deviceContext = deviceContext;
-        _videoDevice = device->QueryInterface<D3DVideoDevice>();
-        _videoContext = deviceContext->QueryInterface<D3DVideoContext>();
-        _width = width;
-        _height = height;
-
-        var rate = Math.Max(1u, (uint)Math.Round(frameRate <= 0 ? 25 : frameRate));
-        var content = new VideoProcessorContentDesc
+        try
         {
-            InputFrameFormat = VideoFrameFormat.Progressive,
-            InputFrameRate = new Rational(rate, 1),
-            InputWidth = (uint)width,
-            InputHeight = (uint)height,
-            OutputFrameRate = new Rational(rate, 1),
-            OutputWidth = (uint)width,
-            OutputHeight = (uint)height,
-            Usage = VideoUsage.PlaybackNormal
-        };
+            _videoDevice = device->QueryInterface<D3DVideoDevice>();
+            _videoContext = deviceContext->QueryInterface<D3DVideoContext>();
+            _width = width;
+            _height = height;
 
-        ComPtr<ID3D11VideoProcessorEnumerator> enumerator = default;
-        ThrowHResult(_videoDevice.CreateVideoProcessorEnumerator(&content, enumerator.GetAddressOf()));
-        _enumerator = enumerator;
+            var rate = Math.Max(1u, (uint)Math.Round(frameRate <= 0 ? 25 : frameRate));
+            var content = new VideoProcessorContentDesc
+            {
+                InputFrameFormat = VideoFrameFormat.Progressive,
+                InputFrameRate = new Rational(rate, 1),
+                InputWidth = (uint)width,
+                InputHeight = (uint)height,
+                OutputFrameRate = new Rational(rate, 1),
+                OutputWidth = (uint)width,
+                OutputHeight = (uint)height,
+                Usage = VideoUsage.PlaybackNormal
+            };
 
-        ComPtr<ID3D11VideoProcessor> processor = default;
-        ThrowHResult(_videoDevice.CreateVideoProcessor(_enumerator, 0, processor.GetAddressOf()));
-        _processor = processor;
-        _videoContext.VideoProcessorSetStreamFrameFormat(_processor, 0, VideoFrameFormat.Progressive);
+            ComPtr<ID3D11VideoProcessorEnumerator> enumerator = default;
+            ThrowHResult(_videoDevice.CreateVideoProcessorEnumerator(&content, enumerator.GetAddressOf()));
+            _enumerator = enumerator;
+
+            ComPtr<ID3D11VideoProcessor> processor = default;
+            ThrowHResult(_videoDevice.CreateVideoProcessor(_enumerator, 0, processor.GetAddressOf()));
+            _processor = processor;
+            _videoContext.VideoProcessorSetStreamFrameFormat(_processor, 0, VideoFrameFormat.Progressive);
+        }
+        catch
+        {
+            Dispose();
+            throw;
+        }
     }
 
     /// <summary>
@@ -118,9 +130,9 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
         }
 
         var surface = RentSurface();
-        surface.BeginWrite();
         try
         {
+            surface.BeginWrite();
             var inputDescription = new VideoProcessorInputViewDesc
             {
                 FourCC = 0,
@@ -145,8 +157,15 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
         }
         catch
         {
-            surface.CancelWrite();
-            Return(surface);
+            // 写锁或转换失败的纹理直接销毁，不能再回到可用池。
+            try
+            {
+                surface.CancelWrite();
+            }
+            finally
+            {
+                surface.Dispose();
+            }
             throw;
         }
     }
@@ -156,17 +175,14 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed)
+        lock (_surfaceSync)
         {
-            return;
+            if (_disposed)
+                return;
+            _disposed = true;
+            while (_available.Count > 0)
+                _available.Dequeue().Dispose();
         }
-
-        _disposed = true;
-        while (_available.TryDequeue(out var surface))
-        {
-            surface.Dispose();
-        }
-
         _processor.Dispose();
         _enumerator.Dispose();
         _videoContext.Dispose();
@@ -178,14 +194,15 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     /// </summary>
     internal void Return(D3D11SharedSurface surface)
     {
-        surface.ResetForReuse();
-        if (_disposed || _available.Count >= SurfacePoolLimit)
+        lock (_surfaceSync)
         {
-            surface.Dispose();
-            return;
+            if (_disposed || _available.Count >= SurfacePoolLimit || !surface.TryResetForReuse())
+            {
+                surface.Dispose();
+                return;
+            }
+            _available.Enqueue(surface);
         }
-
-        _available.Enqueue(surface);
     }
 
     /// <summary>
@@ -193,11 +210,13 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     /// </summary>
     private D3D11SharedSurface RentSurface()
     {
-        if (_available.TryDequeue(out var surface))
+        lock (_surfaceSync)
         {
-            return surface;
+            if (_disposed)
+                throw new ObjectDisposedException(nameof(D3D11VideoProcessor));
+            if (_available.Count > 0)
+                return _available.Dequeue();
         }
-
         return new D3D11SharedSurface(_device, _videoDevice, _enumerator, _width, _height);
     }
 }

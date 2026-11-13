@@ -26,8 +26,7 @@ internal static class PlaybackRatePolicy
     /// <summary>
     /// 按数值、范围、预算的顺序生成唯一的检查结果与滤镜计划。
     /// </summary>
-    internal static bool TryValidate(double rate, FluxEngineOptions options, bool needsAudio,
-        out double[] stages, out string? error)
+    internal static bool TryValidate(double rate, FluxEngineOptions options, bool needsAudio, out double[] stages, out string? error)
     {
         stages = Array.Empty<double>();
         if (!IsSupported(rate))

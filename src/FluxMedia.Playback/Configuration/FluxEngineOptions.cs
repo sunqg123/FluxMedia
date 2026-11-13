@@ -11,12 +11,18 @@ public sealed record FluxEngineOptions
     /// <summary>
     /// FFmpeg 共享库目录。
     /// </summary>
-    public string? FFmpegPath { get; init; }
+    public string? FFmpegPath
+    {
+        get; init;
+    }
 
     /// <summary>
-    /// 是否开启默认文件日志。
+    /// 是否启用 LogConverge 文件日志，进程内首次初始化生效。
     /// </summary>
-    public bool EnableLogging { get; init; }
+    public bool EnableLogging
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 全部播放器允许的最低倍速，必须大于 0 且不超过 1。

@@ -1,5 +1,5 @@
+using LogConverge.Sharp;
 using FluxMedia.Core.Errors;
-using FluxMedia.Core.Logging;
 
 namespace FluxMedia.Core.State;
 
@@ -45,12 +45,18 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
     /// <summary>
     /// 组件名称。
     /// </summary>
-    public string ComponentName { get; }
+    public string ComponentName
+    {
+        get;
+    }
 
     /// <summary>
     /// 当前运行状态。
     /// </summary>
-    public TState State { get; private set; }
+    public TState State
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 是否已完成资源释放。
@@ -78,7 +84,8 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
         {
             ThrowIfDisposed();
             var previous = State;
-            if (EqualityComparer<TState>.Default.Equals(previous, nextState)) return;
+            if (EqualityComparer<TState>.Default.Equals(previous, nextState))
+                return;
             if (!IsTransitionAllowed(previous, nextState))
             {
                 throw new InvalidOperationException($"Invalid {ComponentName} state transition: {previous} -> {nextState}.");
@@ -86,7 +93,6 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
 
             State = nextState;
             changed = true;
-            FluxMediaLog.Write(Configuration.LogLevel.Debug, ComponentName, InstanceId, $"状态已变更：{previous} -> {nextState}");
         }
         finally
         {
@@ -109,7 +115,8 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
     /// </summary>
     protected void NotifyFault(FluxMediaError error, Exception? exception = null)
     {
-        FluxMediaLog.Write(Configuration.LogLevel.Error, ComponentName, InstanceId, error.Message, exception);
+        Log.Error(ComponentName,
+            $"SessionId={InstanceId} Event=PlaybackFault Code={error.Code} State={error.CurrentState} Message={error.Message}", exception);
         InvokeSubscribersSafely(Faulted, error, nameof(Faulted));
     }
 
@@ -118,7 +125,8 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
     /// </summary>
     protected void InvokeSubscribersSafely<TEvent>(EventHandler<TEvent>? handlers, TEvent value, string eventName)
     {
-        if (handlers is null) return;
+        if (handlers is null)
+            return;
         foreach (EventHandler<TEvent> handler in handlers.GetInvocationList())
         {
             try
@@ -127,7 +135,8 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
             }
             catch (Exception ex)
             {
-                FluxMediaLog.Write(Configuration.LogLevel.Error, ComponentName, InstanceId, $"Event=SubscriberFault SubscriberEvent={eventName} Error={ex.Message}", ex);
+                Log.Error(ComponentName,
+                    $"SessionId={InstanceId} Event=SubscriberFault SubscriberEvent={eventName} Error={ex.Message}", ex);
             }
         }
     }

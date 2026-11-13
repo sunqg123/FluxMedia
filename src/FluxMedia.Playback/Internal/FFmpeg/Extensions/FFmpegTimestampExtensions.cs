@@ -13,10 +13,12 @@ internal static class FFmpegTimestampExtensions
     public static bool TryGetMediaTime(this AVRational timeBase, long pts, TimeSpan timestampOrigin, out TimeSpan timestamp)
     {
         timestamp = TimeSpan.Zero;
-        if (pts < 0) return false;
+        if (pts < 0)
+            return false;
 
         var seconds = pts * ffmpeg.av_q2d(timeBase);
-        if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0) return false;
+        if (double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0)
+            return false;
 
         var value = TimeSpan.FromSeconds(seconds) - timestampOrigin;
         timestamp = value < TimeSpan.Zero ? TimeSpan.Zero : value;

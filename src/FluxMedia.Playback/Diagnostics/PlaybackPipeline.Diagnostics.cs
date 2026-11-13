@@ -15,7 +15,10 @@ internal sealed partial class PlaybackPipeline
     /// </summary>
     public string? ReadAudioDeviceState()
     {
-        try { return _audioOutput?.State.ToString(); }
+        try
+        {
+            return _audioOutput?.State.ToString();
+        }
         catch (ObjectDisposedException) { return null; }
     }
 }

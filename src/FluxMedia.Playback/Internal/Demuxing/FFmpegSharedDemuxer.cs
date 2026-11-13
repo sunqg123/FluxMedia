@@ -1,6 +1,5 @@
+using LogConverge.Sharp;
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.Playback;
@@ -119,12 +118,18 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 视频流。
     /// </summary>
-    public FFmpegStreamDescriptor? VideoStream { get; private set; }
+    public FFmpegStreamDescriptor? VideoStream
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 音频流。
     /// </summary>
-    public FFmpegStreamDescriptor? AudioStream { get; private set; }
+    public FFmpegStreamDescriptor? AudioStream
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 媒体信息就绪后确定的基础时序模式。
@@ -169,7 +174,10 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// <summary>
     /// 媒体信息。
     /// </summary>
-    public MediaInfo? MediaInfo { get; private set; }
+    public MediaInfo? MediaInfo
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 当前原生读取位置对应的数据包代次。
@@ -264,10 +272,14 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// </summary>
     public void Stop()
     {
-        try { _lifetimeCts?.Cancel(); }
+        try
+        {
+            _lifetimeCts?.Cancel();
+        }
         catch (Exception exception)
         {
-            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegSharedDemuxer), _instanceId, "Event=DemuxerCancelFailed", exception);
+            Log.Error(nameof(FFmpegSharedDemuxer),
+                $"SessionId={_instanceId} Event=DemuxerCancelFailed", exception);
         }
         CompletePendingSeekRequests(new OperationCanceledException("The demuxer has been stopped."));
         _videoPackets.Complete();
@@ -282,7 +294,8 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         Task? demuxTask;
         lock (_disposeSync)
         {
-            if (_disposed) return;
+            if (_disposed)
+                return;
             _disposed = true;
             Stop();
             demuxTask = _demuxTask;
@@ -298,10 +311,14 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         _ = demuxTask.ContinueWith(static (_, state) =>
         {
             var demuxer = (FFmpegSharedDemuxer)state!;
-            try { demuxer.DisposeResources(); }
+            try
+            {
+                demuxer.DisposeResources();
+            }
             catch (Exception exception)
             {
-                FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegSharedDemuxer), demuxer._instanceId, "Event=DeferredDemuxerCleanupFailed", exception);
+                Log.Error(nameof(FFmpegSharedDemuxer),
+                    $"SessionId={demuxer._instanceId} Event=DeferredDemuxerCleanupFailed", exception);
             }
         }, this, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
     }
@@ -313,7 +330,8 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     {
         lock (_disposeSync)
         {
-            if (_resourcesDisposed) return;
+            if (_resourcesDisposed)
+                return;
             _resourcesDisposed = true;
         }
 
@@ -328,16 +346,20 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             _recording = null;
         }
         Release(() => { lock (_recordingSync) ClearRecordingPreroll(); });
-        Release(() => recording?.DisposeAsync().AsTask().GetAwaiter().GetResult());
+        Release(() => recording?.SuspendForDiscontinuity());
         Release(() => VideoStream?.Dispose());
         Release(() => AudioStream?.Dispose());
         Release(() => _lifetimeCts?.Dispose());
-        if (errors.Count > 0) throw new AggregateException("解复用资源释放失败。", errors);
+        if (errors.Count > 0)
+            throw new AggregateException("解复用资源释放失败。", errors);
 
         // 每项资源均尝试清理，最后统一报告异常。
         void Release(Action release)
         {
-            try { release(); }
+            try
+            {
+                release();
+            }
             catch (Exception exception) { errors.Add(exception); }
         }
     }
@@ -388,7 +410,6 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                 _audioPackets.ConfigureTiming(AudioStream.TimeBase, EstimateAudioPacketDuration(formatContext, AudioStream), AudioStream.StartTime);
             }
 
-            StartPendingRecordingIfNeeded();
             _ready?.TrySetResult(true);
             _readGate.Wait(cancellationToken);
 
@@ -413,7 +434,8 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             {
                 while (_seekRequests.TryDequeue(out var seek))
                 {
-                    if (seek.IsCompleted) continue;
+                    if (seek.IsCompleted)
+                        continue;
                     try
                     {
                         interrupt.ResetDeadline();
@@ -436,7 +458,8 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                     do
                     {
                         read = ffmpeg.av_read_frame(formatContext, packet);
-                        if (read != ffmpeg.AVERROR(ffmpeg.EAGAIN) || interrupt.ShouldInterrupt()) break;
+                        if (read != ffmpeg.AVERROR(ffmpeg.EAGAIN) || interrupt.ShouldInterrupt())
+                            break;
                         cancellationToken.WaitHandle.WaitOne(2);
                     } while (true);
                 }
@@ -501,7 +524,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             CompletePendingSeekRequests(ex);
             _videoPackets.Complete(ex);
             _audioPackets.Complete(ex);
-            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxError Source={_source.Uri} Error={ex.Message}", ex);
+
             throw;
         }
         finally
@@ -544,8 +567,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         EnsureSeekable();
         var seekTarget = (long)(target.TotalSeconds * ffmpeg.AV_TIME_BASE);
         var result = ffmpeg.av_seek_frame(formatContext, -1, seekTarget, ffmpeg.AVSEEK_FLAG_BACKWARD);
-        FluxMediaLog.Write(
-            result < 0 ? LogLevel.Warning : LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=SharedDemuxRuntimeSeek Target={target} Result={result} FFmpegErrorText={FFmpegErrorHelper.GetErrorMessageOrNull(result) ?? "-"}");
+
         FFmpegErrorHelper.ThrowIfError(result, "av_seek_frame");
         Interlocked.Increment(ref _packetGeneration);
     }
@@ -563,7 +585,8 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 
         while (!_disposed && !cancellationToken.IsCancellationRequested)
         {
-            if (queue.TryWriteOrderedWithoutDrop(packet)) return true;
+            if (queue.TryWriteOrderedWithoutDrop(packet))
+                return true;
             if (!_seekRequests.IsEmpty)
             {
                 packet.Dispose();

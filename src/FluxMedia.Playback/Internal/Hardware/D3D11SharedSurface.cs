@@ -15,6 +15,21 @@ namespace FluxMedia.Playback.Internal.Hardware;
 internal sealed unsafe class D3D11SharedSurface : IDisposable
 {
     /// <summary>
+    /// 写锁等待上限，避免异常设备阻止播放停止。
+    /// </summary>
+    private const uint WriteLockTimeoutMilliseconds = 1000;
+
+    /// <summary>
+    /// 未取得互斥锁的超时状态。
+    /// </summary>
+    private const int WaitTimeout = 0x102;
+
+    /// <summary>
+    /// 共享表面已失效的状态。
+    /// </summary>
+    private const int WaitAbandoned = 0x80;
+
+    /// <summary>
     /// 纹理。
     /// </summary>
     private ComPtr<D3DTexture2D> _texture;
@@ -39,44 +54,55 @@ internal sealed unsafe class D3D11SharedSurface : IDisposable
     /// </summary>
     public D3D11SharedSurface(D3DDevice* device, ComPtr<D3DVideoDevice> videoDevice, ComPtr<ID3D11VideoProcessorEnumerator> enumerator, int width, int height)
     {
-        var description = new Texture2DDesc
+        try
         {
-            Format = DxgiFormat.FormatB8G8R8A8Unorm,
-            Width = (uint)width,
-            Height = (uint)height,
-            ArraySize = 1,
-            MipLevels = 1,
-            SampleDesc = new SampleDesc(1, 0),
-            Usage = Usage.Default,
-            BindFlags = (uint)(BindFlag.RenderTarget | BindFlag.ShaderResource),
-            CPUAccessFlags = 0,
-            MiscFlags = (uint)ResourceMiscFlag.SharedKeyedmutex
-        };
+            var description = new Texture2DDesc
+            {
+                Format = DxgiFormat.FormatB8G8R8A8Unorm,
+                Width = (uint)width,
+                Height = (uint)height,
+                ArraySize = 1,
+                MipLevels = 1,
+                SampleDesc = new SampleDesc(1, 0),
+                Usage = Usage.Default,
+                BindFlags = (uint)(BindFlag.RenderTarget | BindFlag.ShaderResource),
+                CPUAccessFlags = 0,
+                MiscFlags = (uint)ResourceMiscFlag.SharedKeyedmutex
+            };
 
-        ComPtr<D3DTexture2D> texture = default;
-        ThrowHResult(device->CreateTexture2D(&description, (SubresourceData*)null, texture.GetAddressOf()));
-        _texture = texture;
-        _mutex = _texture.QueryInterface<IDXGIKeyedMutex>();
+            ComPtr<D3DTexture2D> texture = default;
+            ThrowHResult(device->CreateTexture2D(&description, (SubresourceData*)null, texture.GetAddressOf()));
+            _texture = texture;
+            _mutex = _texture.QueryInterface<IDXGIKeyedMutex>();
 
-        using var resource = _texture.QueryInterface<IDXGIResource>();
-        void* sharedHandle = null;
-        ThrowHResult(resource.GetSharedHandle(ref sharedHandle));
-        SharedHandle = (nint)sharedHandle;
+            using var resource = _texture.QueryInterface<IDXGIResource>();
+            void* sharedHandle = null;
+            ThrowHResult(resource.GetSharedHandle(ref sharedHandle));
+            SharedHandle = (nint)sharedHandle;
 
-        var outputDescription = new VideoProcessorOutputViewDesc
+            var outputDescription = new VideoProcessorOutputViewDesc
+            {
+                ViewDimension = VpovDimension.Texture2D,
+                Texture2D = new Tex2DVpov(0)
+            };
+            ComPtr<ID3D11VideoProcessorOutputView> outputView = default;
+            ThrowHResult(videoDevice.CreateVideoProcessorOutputView((ID3D11Resource*)_texture.Handle, enumerator, &outputDescription, outputView.GetAddressOf()));
+            _outputView = outputView;
+        }
+        catch
         {
-            ViewDimension = VpovDimension.Texture2D,
-            Texture2D = new Tex2DVpov(0)
-        };
-        ComPtr<ID3D11VideoProcessorOutputView> outputView = default;
-        ThrowHResult(videoDevice.CreateVideoProcessorOutputView((ID3D11Resource*)_texture.Handle, enumerator, &outputDescription, outputView.GetAddressOf()));
-        _outputView = outputView;
+            Dispose();
+            throw;
+        }
     }
 
     /// <summary>
     /// 共享句柄。
     /// </summary>
-    public nint SharedHandle { get; }
+    public nint SharedHandle
+    {
+        get;
+    }
 
     /// <summary>
     /// 输出视图。
@@ -88,7 +114,7 @@ internal sealed unsafe class D3D11SharedSurface : IDisposable
     /// </summary>
     public void BeginWrite()
     {
-        ThrowHResult(_mutex.AcquireSync(0, uint.MaxValue));
+        EnsureMutexSuccess(_mutex.AcquireSync(0, WriteLockTimeoutMilliseconds));
         _writeLocked = true;
     }
 
@@ -102,12 +128,12 @@ internal sealed unsafe class D3D11SharedSurface : IDisposable
             return;
         }
 
-        ThrowHResult(_mutex.ReleaseSync(1));
+        EnsureMutexSuccess(_mutex.ReleaseSync(1));
         _writeLocked = false;
     }
 
     /// <summary>
-    /// 取消当前纹理写入并释放锁。
+    /// 销毁失败纹理前，尽力归还已取得的写锁。
     /// </summary>
     public void CancelWrite()
     {
@@ -121,15 +147,32 @@ internal sealed unsafe class D3D11SharedSurface : IDisposable
     }
 
     /// <summary>
-    /// 重置共享表面以供再次租用。
+    /// 仅将已确认释放的共享表面重置为写入状态。
     /// </summary>
-    public void ResetForReuse()
+    public bool TryResetForReuse()
     {
         var result = _mutex.AcquireSync(1, 0);
-        if (result >= 0)
-        {
-            _mutex.ReleaseSync(0);
-        }
+        if (result == 0)
+            return _mutex.ReleaseSync(0) == 0;
+        if (result != WaitTimeout)
+            return false;
+        // 显示端可能已交回键 0；确认所有权后才能继续复用。
+        return _mutex.AcquireSync(0, 0) == 0 && _mutex.ReleaseSync(0) == 0;
+    }
+
+    /// <summary>
+    /// 只接受 S_OK，超时和失效不能按普通成功处理。
+    /// </summary>
+    private static void EnsureMutexSuccess(int result)
+    {
+        if (result == 0)
+            return;
+        if (result == WaitTimeout)
+            throw new TimeoutException("等待 D3D11 共享纹理互斥锁超时。");
+        if (result == WaitAbandoned)
+            throw new InvalidOperationException("D3D11 共享纹理互斥锁已失效，必须重建纹理。");
+        ThrowHResult(result);
+        throw new InvalidOperationException($"D3D11 互斥锁返回了意外状态：0x{result:X8}。");
     }
 
     /// <summary>

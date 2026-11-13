@@ -1,5 +1,4 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Playback.Internal.Audio;
 
@@ -134,7 +133,10 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     /// <summary>
     /// 最近错误。
     /// </summary>
-    public string? LastError { get; private set; }
+    public string? LastError
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 当前运行状态。
@@ -148,7 +150,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         lock (_syncRoot)
         {
-            if (_disposed || IsAvailable) return;
+            if (_disposed || IsAvailable)
+                return;
             if (sampleRate <= 0)
             {
                 Fail($"无效采样率：{sampleRate}");
@@ -190,8 +193,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
             {
                 LastError = ex.Message;
                 _state = AudioOutputState.Failed;
-                FluxMediaLog.Write(
-                    LogLevel.Error, nameof(OpenALPlaybackOutput), _instanceId, $"Event=AudioOutputInitFailed Backend={BackendName} SampleRate={sampleRate} Channels={channels} Error={ex.Message}", ex);
+                Log.Error(nameof(OpenALPlaybackOutput),
+                    $"SessionId={_instanceId} Event=AudioOutputInitFailed Backend={BackendName} SampleRate={sampleRate} Channels={channels} Error={ex.Message}", ex);
                 ReleaseNativeResources();
             }
         }
@@ -204,7 +207,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         lock (_syncRoot)
         {
-            if (!PrepareOperation()) return;
+            if (!PrepareOperation())
+                return;
             OpenALNative.AlSourcePlay(_source);
             ThrowIfAlError("alSourcePlay");
             _state = AudioOutputState.Playing;
@@ -218,7 +222,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         lock (_syncRoot)
         {
-            if (!PrepareOperation()) return;
+            if (!PrepareOperation())
+                return;
             OpenALNative.AlSourcePause(_source);
             ThrowIfAlError("alSourcePause");
             _state = AudioOutputState.Paused;
@@ -232,7 +237,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         lock (_syncRoot)
         {
-            if (!PrepareOperation()) return;
+            if (!PrepareOperation())
+                return;
             OpenALNative.AlSourceStop(_source);
             ThrowIfAlError("alSourceStop");
             ClearQueuedBuffers();
@@ -247,7 +253,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         lock (_syncRoot)
         {
-            if (!PrepareOperation()) return;
+            if (!PrepareOperation())
+                return;
             OpenALNative.AlSourceStop(_source);
             ThrowIfAlError("alSourceStop");
             ClearQueuedBuffers();
@@ -290,12 +297,14 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     /// </summary>
     private void Write(byte[] pcm, int length)
     {
-        if (length <= 0) return;
+        if (length <= 0)
+            return;
         while (true)
         {
             lock (_syncRoot)
             {
-                if (!PrepareOperation() || _format is null) return;
+                if (!PrepareOperation() || _format is null)
+                    return;
                 ReclaimProcessedBuffers();
                 OpenALNative.AlGetSourcei(_source, AlBuffersQueued, out var queued);
                 ThrowIfAlError("alGetSourcei(AL_BUFFERS_QUEUED)");
@@ -336,7 +345,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         lock (_syncRoot)
         {
-            if (_disposed) return;
+            if (_disposed)
+                return;
             _disposed = true;
             try
             {
@@ -349,8 +359,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
             }
             catch (Exception ex)
             {
-                FluxMediaLog.Write(
-                    LogLevel.Error, nameof(OpenALPlaybackOutput), _instanceId, $"Event=DisposeAudioError Backend={BackendName} Error={ex.Message}", ex);
+                Log.Error(nameof(OpenALPlaybackOutput),
+                    $"SessionId={_instanceId} Event=DisposeAudioError Backend={BackendName} Error={ex.Message}", ex);
             }
             finally
             {
@@ -365,7 +375,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     /// </summary>
     private bool PrepareOperation()
     {
-        if (_disposed || _source == 0 || _context == IntPtr.Zero) return false;
+        if (_disposed || _source == 0 || _context == IntPtr.Zero)
+            return false;
         EnsureContextCurrent();
         return true;
     }
@@ -426,7 +437,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         OpenALNative.AlGetSourcei(_source, AlSourceState, out var sourceState);
         ThrowIfAlError("alGetSourcei(AL_SOURCE_STATE)");
-        if (sourceState == AlPlaying || _state == AudioOutputState.Paused) return;
+        if (sourceState == AlPlaying || _state == AudioOutputState.Paused)
+            return;
         OpenALNative.AlSourcePlay(_source);
         ThrowIfAlError("alSourcePlay");
         _state = AudioOutputState.Playing;
@@ -483,7 +495,8 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     private TimeSpan DurationFromBytes(long bytes)
     {
         var format = _format;
-        if (format is null || format.SampleRate <= 0 || format.Channels <= 0 || format.BitsPerSample <= 0) return TimeSpan.Zero;
+        if (format is null || format.SampleRate <= 0 || format.Channels <= 0 || format.BitsPerSample <= 0)
+            return TimeSpan.Zero;
         var bytesPerSecond = format.SampleRate * format.Channels * (format.BitsPerSample / 8d);
         return bytesPerSecond <= 0 ? TimeSpan.Zero : TimeSpan.FromSeconds(Math.Max(0, bytes / bytesPerSecond));
     }
@@ -538,7 +551,7 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         LastError = message;
         _state = AudioOutputState.Failed;
-        FluxMediaLog.Write(
-            LogLevel.Error, nameof(OpenALPlaybackOutput), _instanceId, $"Event=AudioOutputInitFailed Backend={BackendName} Error={message}");
+        Log.Error(nameof(OpenALPlaybackOutput),
+            $"SessionId={_instanceId} Event=AudioOutputInitFailed Backend={BackendName} Error={message}");
     }
 }

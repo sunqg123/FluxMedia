@@ -42,32 +42,50 @@ internal sealed unsafe class FFmpegStreamDescriptor : IDisposable
     /// <summary>
     /// 流索引。
     /// </summary>
-    public int StreamIndex { get; }
+    public int StreamIndex
+    {
+        get;
+    }
 
     /// <summary>
     /// 媒体类型。
     /// </summary>
-    public AVMediaType MediaType { get; }
+    public AVMediaType MediaType
+    {
+        get;
+    }
 
     /// <summary>
     /// 时间基。
     /// </summary>
-    public AVRational TimeBase { get; }
+    public AVRational TimeBase
+    {
+        get;
+    }
 
     /// <summary>
     /// 平均帧率。
     /// </summary>
-    public AVRational AverageFrameRate { get; }
+    public AVRational AverageFrameRate
+    {
+        get;
+    }
 
     /// <summary>
     /// 实际帧率。
     /// </summary>
-    public AVRational RealFrameRate { get; }
+    public AVRational RealFrameRate
+    {
+        get;
+    }
 
     /// <summary>
     /// 起始时间。
     /// </summary>
-    public TimeSpan StartTime { get; }
+    public TimeSpan StartTime
+    {
+        get;
+    }
 
     /// <summary>
     /// 编解码参数。
@@ -89,7 +107,8 @@ internal sealed unsafe class FFmpegStreamDescriptor : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
         var parameters = _codecParameters;
         _codecParameters = null;
         if (parameters != null)

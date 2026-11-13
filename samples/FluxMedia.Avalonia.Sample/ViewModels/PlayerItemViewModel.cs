@@ -62,7 +62,10 @@ public sealed class PlayerItemViewModel : NotifyObject, IDisposable
     /// <summary>
     /// 页面提供的播放器，由页面负责释放。
     /// </summary>
-    public Player Player { get; }
+    public Player Player
+    {
+        get;
+    }
 
     /// <summary>
     /// 媒体地址和录制路径。
@@ -72,22 +75,34 @@ public sealed class PlayerItemViewModel : NotifyObject, IDisposable
     /// <summary>
     /// 选择本地媒体。
     /// </summary>
-    public ICommand BrowseCommand { get; }
+    public ICommand BrowseCommand
+    {
+        get;
+    }
 
     /// <summary>
     /// 打开输入地址并播放。
     /// </summary>
-    public ICommand OpenCommand { get; }
+    public ICommand OpenCommand
+    {
+        get;
+    }
 
     /// <summary>
     /// 开始录制。
     /// </summary>
-    public ICommand StartRecordingCommand { get; }
+    public ICommand StartRecordingCommand
+    {
+        get;
+    }
 
     /// <summary>
     /// 停止录制。
     /// </summary>
-    public ICommand StopRecordingCommand { get; }
+    public ICommand StopRecordingCommand
+    {
+        get;
+    }
 
     /// <summary>
     /// 播放诊断文本。

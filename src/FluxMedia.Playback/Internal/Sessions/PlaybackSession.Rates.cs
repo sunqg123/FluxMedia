@@ -1,5 +1,4 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 using FluxMedia.Playback.Internal;
 
 namespace FluxMedia.Playback;
@@ -37,8 +36,8 @@ internal sealed partial class PlaybackSession
         var actual = valid && CanSeekCurrentSource() ? requested : PlaybackRatePolicy.Normal;
         if (!valid || actual != requested)
         {
-            FluxMediaLog.Write(LogLevel.Warning, nameof(PlaybackSession), InstanceId,
-                $"Event=InitialPlaybackRateRejected RequestedRate={requested} MinRate={_engineOptions.MinPlaybackRate} MaxRate={_engineOptions.MaxPlaybackRate} AppliedRate={actual} Budget={_engineOptions.MaxAudioTempoStages} Reason={error ?? "当前媒体不支持倍速"}");
+            Log.Warning(nameof(PlaybackSession),
+                $"SessionId={InstanceId} Event=InitialPlaybackRateRejected RequestedRate={requested} MinRate={_engineOptions.MinPlaybackRate} MaxRate={_engineOptions.MaxPlaybackRate} AppliedRate={actual} Budget={_engineOptions.MaxAudioTempoStages} Reason={error ?? "当前媒体不支持倍速"}");
         }
         _rates.Submit(actual, defer: true);
     }
@@ -59,7 +58,8 @@ internal sealed partial class PlaybackSession
         var result = await completion.ConfigureAwait(false);
         if (!result.IsSuccess)
         {
-            if (result.Error == PlaybackError.OperationCanceled) throw new OperationCanceledException(result.Message);
+            if (result.Error == PlaybackError.OperationCanceled)
+                throw new OperationCanceledException(result.Message);
             throw new InvalidOperationException(result.Message);
         }
     }
@@ -75,7 +75,8 @@ internal sealed partial class PlaybackSession
     private void OnRateCommitFaulted(long generation, Exception error)
     {
         var pipeline = Volatile.Read(ref _pipeline);
-        if (pipeline is null || pipeline.RateGeneration != generation) return;
+        if (pipeline is null || pipeline.RateGeneration != generation)
+            return;
         pipeline.Fail(error);
         _rates.Retire(preservePending: false);
         // 故障状态迁移另行排队，提交调用栈不获取管线锁。
@@ -87,13 +88,25 @@ internal sealed partial class PlaybackSession
     /// </summary>
     private async Task ReportRateCommitFaultAsync(PlaybackPipeline pipeline, Exception error)
     {
-        await _pipelineMutationGate.WaitAsync().ConfigureAwait(false);
+        var entered = false;
         try
         {
-            if (!ReferenceEquals(_pipeline, pipeline) || IsDisposed || State is PlaybackState.Stopping or PlaybackState.Stopped or PlaybackState.Failed) return;
+            await _pipelineMutationGate.WaitAsync().ConfigureAwait(false);
+            entered = true;
+            if (!ReferenceEquals(_pipeline, pipeline) || IsDisposed || State is PlaybackState.Stopping or PlaybackState.Stopped or PlaybackState.Failed)
+                return;
             await TransitionAsync(PlaybackState.Failed).ConfigureAwait(false);
             NotifyFault(CreateError(PlaybackError.PlayFailed, error.Message), error);
         }
-        finally { _pipelineMutationGate.Release(); }
+        catch (Exception exception)
+        {
+            Log.Error(nameof(PlaybackSession),
+                $"SessionId={InstanceId} Event=RateCommitFaultReportFailed", exception);
+        }
+        finally
+        {
+            if (entered)
+                _pipelineMutationGate.Release();
+        }
     }
 }

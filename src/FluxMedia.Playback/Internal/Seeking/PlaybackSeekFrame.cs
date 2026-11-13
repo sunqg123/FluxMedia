@@ -33,19 +33,35 @@ internal sealed class PlaybackSeekFrame
     /// <summary>
     /// 所属跳转编号。
     /// </summary>
-    public long RequestId { get; }
+    public long RequestId
+    {
+        get;
+    }
     /// <summary>
     /// 本次目标位置。
     /// </summary>
-    public TimeSpan Target { get; }
+    public TimeSpan Target
+    {
+        get;
+    }
     /// <summary>
     /// 本次执行开始时间。
     /// </summary>
-    public DateTimeOffset StartedAt { get; }
+    public DateTimeOffset StartedAt
+    {
+        get;
+    }
     /// <summary>
     /// 只由本代目标附近帧完成的通知。
     /// </summary>
-    public Task<(TimeSpan Timestamp, TimeSpan Elapsed)> FirstFrame { get { lock (_sync) return _completion.Task; } }
+    public Task<(TimeSpan Timestamp, TimeSpan Elapsed)> FirstFrame
+    {
+        get
+        {
+            lock (_sync)
+                return _completion.Task;
+        }
+    }
 
     /// <summary>
     /// 定位或重建完成后绑定独立帧代次。
@@ -67,7 +83,8 @@ internal sealed class PlaybackSeekFrame
         lock (_sync)
         {
             if (_completion.Task.IsCompleted || _epoch is null || !frame.IsCurrent || !frame.IsFromEpoch(_epoch)
-                || frame.Timestamp + TimeSpan.FromMilliseconds(40) < Target) return false;
+                || frame.Timestamp + TimeSpan.FromMilliseconds(40) < Target)
+                return false;
             return _completion.TrySetResult((frame.Timestamp, DateTimeOffset.UtcNow - StartedAt));
         }
     }

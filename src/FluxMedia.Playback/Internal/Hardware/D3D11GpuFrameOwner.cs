@@ -49,7 +49,8 @@ internal sealed class D3D11GpuFrameOwner : IVideoFrameOwner
                 throw new ObjectDisposedException(nameof(D3D11GpuFrameOwner));
             }
 
-            if (Interlocked.CompareExchange(ref _referenceCount, current + 1, current) == current) return;
+            if (Interlocked.CompareExchange(ref _referenceCount, current + 1, current) == current)
+                return;
         }
     }
 
@@ -58,7 +59,8 @@ internal sealed class D3D11GpuFrameOwner : IVideoFrameOwner
     /// </summary>
     public void Release()
     {
-        if (Interlocked.Decrement(ref _referenceCount) != 0) return;
+        if (Interlocked.Decrement(ref _referenceCount) != 0)
+            return;
         var pool = Interlocked.Exchange(ref _pool, null);
         var surface = Interlocked.Exchange(ref _surface, null);
         if (pool is not null && surface is not null)

@@ -4,8 +4,8 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Controls.Templates;
 using Avalonia.Media;
 using Avalonia.Threading;
-using FluxMedia.Avalonia.Internal;
 using FluxMedia.Avalonia.Bindings;
+using FluxMedia.Avalonia.Internal;
 using FluxMedia.Playback;
 using System.Windows.Input;
 
@@ -19,7 +19,10 @@ public sealed partial class FluxPlayerControl : TemplatedControl
     /// <summary>
     /// 控件默认倍速档位，与核心允许范围分别维护。
     /// </summary>
-    public static IReadOnlyList<double> DefaultSpeeds { get; } =
+    public static IReadOnlyList<double> DefaultSpeeds
+    {
+        get;
+    } =
         Array.AsReadOnly(new[] { 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0 });
 
     /// <summary>
@@ -379,7 +382,8 @@ public sealed partial class FluxPlayerControl : TemplatedControl
             return;
         _autoHideTimer.Stop();
         // 隐藏获得焦点的按钮后，键盘仍可在播放器上唤回控制栏。
-        if (_controlsHost?.IsKeyboardFocusWithin == true) Focus();
+        if (_controlsHost?.IsKeyboardFocusWithin == true)
+            Focus();
         SetAndRaise(AreControlsVisibleProperty, ref _areControlsVisible, false);
     }
 }

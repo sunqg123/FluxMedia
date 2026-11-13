@@ -1,6 +1,4 @@
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 
 namespace FluxMedia.Playback.Internal;

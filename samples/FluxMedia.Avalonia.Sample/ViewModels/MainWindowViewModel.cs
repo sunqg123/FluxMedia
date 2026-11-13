@@ -30,7 +30,10 @@ public sealed class MainWindowViewModel : NotifyObject, IAsyncDisposable
     /// <summary>
     /// 添加尚未打开媒体的播放器。
     /// </summary>
-    public ICommand AddPlayerCommand { get; }
+    public ICommand AddPlayerCommand
+    {
+        get;
+    }
 
     /// <summary>
     /// 当前播放器数量。

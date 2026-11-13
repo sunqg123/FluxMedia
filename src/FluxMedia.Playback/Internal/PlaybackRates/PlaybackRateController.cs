@@ -1,5 +1,4 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Playback.Internal;
 
@@ -106,7 +105,14 @@ internal sealed class PlaybackRateController
     /// <summary>
     /// 当前控制唤醒任务，不消费数据包。
     /// </summary>
-    public Task ChangeSignal { get { lock (_sync) return _changed.Task; } }
+    public Task ChangeSignal
+    {
+        get
+        {
+            lock (_sync)
+                return _changed.Task;
+        }
+    }
 
     /// <summary>
     /// 为新媒体清理请求并校验配置。
@@ -154,7 +160,8 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (generation != _generation) return;
+            if (generation != _generation)
+                return;
             _hasAudio = hasAudio;
             ApplyWithoutAudioLocked();
             RefreshLocked();
@@ -168,7 +175,11 @@ internal sealed class PlaybackRateController
     /// </summary>
     public void AudioStarting(long generation)
     {
-        lock (_sync) { if (generation == _generation) _audioStarted = true; }
+        lock (_sync)
+        {
+            if (generation == _generation)
+                _audioStarted = true;
+        }
     }
 
     /// <summary>
@@ -178,7 +189,8 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (generation != _generation) return;
+            if (generation != _generation)
+                return;
             _audioReady = true;
             SignalLocked();
         }
@@ -192,14 +204,17 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (generation != _generation) return;
+            if (generation != _generation)
+                return;
             _audioReady = false;
             _audioStarted = false;
             _audioEnded = completed;
             var committingRequestId = _committing?.Id;
             var failedRequestId = faulted ? _pending?.Id ?? committingRequestId : committingRequestId;
-            if (completed) ApplyWithoutAudioLocked();
-            else if (faulted) RejectAllLocked("音频工作器已失败。", PlaybackError.PlayFailed);
+            if (completed)
+                ApplyWithoutAudioLocked();
+            else if (faulted)
+                RejectAllLocked("音频工作器已失败。", PlaybackError.PlayFailed);
             else if (_committing is not null)
             {
                 FinishLocked(_committing, PlaybackResult.Failure(PlaybackError.OperationCanceled, "提交所属音频工作器已退出。"));
@@ -230,7 +245,12 @@ internal sealed class PlaybackRateController
                 error = capabilityError ?? "当前媒体不支持倍速播放。";
             }
             request = new PlaybackRateRequest(++_requestId, rate, stages);
-            Volatile.Write(ref _snapshot, _snapshot with { RequestId = request.Id, RequestedRate = rate, LastError = null });
+            Volatile.Write(ref _snapshot, _snapshot with
+            {
+                RequestId = request.Id,
+                RequestedRate = rate,
+                LastError = null
+            });
             if (!valid)
             {
                 var failure = PlaybackResult.Failure(PlaybackError.PlaybackRateNotSupported, error!);
@@ -239,7 +259,8 @@ internal sealed class PlaybackRateController
             }
             else
             {
-                if (_pending is not null) FinishLocked(_pending, PlaybackResult.Failure(PlaybackError.OperationCanceled, "倍速请求已被新目标取代。"));
+                if (_pending is not null)
+                    FinishLocked(_pending, PlaybackResult.Failure(PlaybackError.OperationCanceled, "倍速请求已被新目标取代。"));
                 _pending = request;
                 if (_committing is null && rate == _snapshot.AppliedRate)
                     ApplyPendingLocked();
@@ -291,7 +312,8 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (!CanCommitLocked(generation, resyncVersion) || !ReferenceEquals(_pending, request)) return false;
+            if (!CanCommitLocked(generation, resyncVersion) || !ReferenceEquals(_pending, request))
+                return false;
             _pending = null;
             _committing = request;
             request.State = PlaybackRateRequestState.Committing;
@@ -309,15 +331,18 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (generation != _generation || resyncVersion != _resyncVersion || !ReferenceEquals(_committing, request)) return;
+            if (generation != _generation || resyncVersion != _resyncVersion || !ReferenceEquals(_committing, request))
+                return;
             _committing = null;
             var sameTarget = _pending?.Rate == request.Rate ? _pending : null;
-            if (sameTarget is not null) _pending = null;
+            if (sameTarget is not null)
+                _pending = null;
             // 先原子发布完整快照，再放行等待者。
             RefreshLocked("Applied", appliedRate: request.Rate,
                 requestId: sameTarget?.Id ?? request.Id, clearError: true);
             FinishLocked(request, PlaybackResult.Success());
-            if (sameTarget is not null) FinishLocked(sameTarget, PlaybackResult.Success());
+            if (sameTarget is not null)
+                FinishLocked(sameTarget, PlaybackResult.Success());
             SignalLocked();
         }
         Notify();
@@ -330,13 +355,15 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (generation != _generation || resyncVersion != _resyncVersion || !ReferenceEquals(_pending, request)) return;
+            if (generation != _generation || resyncVersion != _resyncVersion || !ReferenceEquals(_pending, request))
+                return;
             _pending = null;
             FinishLocked(request, PlaybackResult.Failure(PlaybackError.PlaybackRateNotSupported, error.Message));
             RefreshLocked("Rejected", error.Message, requestId: request.Id);
             SignalLocked();
         }
-        FluxMediaLog.Write(LogLevel.Warning, nameof(PlaybackRateController), _instanceId, $"Event=RateBuildRejected RequestId={request.Id} Rate={request.Rate}", error);
+        Log.Write(LogLevel.Warning, nameof(PlaybackRateController),
+            $"SessionId={_instanceId} Event=RateBuildRejected RequestId={request.Id} Rate={request.Rate}", error);
         Notify();
     }
 
@@ -360,7 +387,8 @@ internal sealed class PlaybackRateController
                     rejectedRequestId = _pending.Id;
                     _pending = null;
                 }
-                else DeferLocked(_pending);
+                else
+                    DeferLocked(_pending);
             }
             RefreshLocked(rejection is null ? null : "Abandoned", rejection, requestId: rejectedRequestId);
             completion = _committing?.Completion.Task ?? Task.FromResult(PlaybackResult.Success());
@@ -377,7 +405,8 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (_suspensions > 0) _suspensions--;
+            if (_suspensions > 0)
+                _suspensions--;
             ApplyWithoutAudioLocked();
             RefreshLocked();
             SignalLocked();
@@ -390,7 +419,11 @@ internal sealed class PlaybackRateController
     /// </summary>
     public void Resync(long version)
     {
-        lock (_sync) { _resyncVersion = version; SignalLocked(); }
+        lock (_sync)
+        {
+            _resyncVersion = version;
+            SignalLocked();
+        }
     }
 
     /// <summary>
@@ -398,7 +431,8 @@ internal sealed class PlaybackRateController
     /// </summary>
     public void Wake()
     {
-        lock (_sync) SignalLocked();
+        lock (_sync)
+            SignalLocked();
     }
 
     /// <summary>
@@ -412,7 +446,8 @@ internal sealed class PlaybackRateController
             var retiredRequestId = !preservePending && _pending is not null ? _pending.Id : _committing?.Id;
             _generation++;
             _audioStarted = _audioReady = _audioEnded = false;
-            if (_committing is not null) FinishLocked(_committing, PlaybackResult.Failure(PlaybackError.OperationCanceled, "提交所属管线已退役。"));
+            if (_committing is not null)
+                FinishLocked(_committing, PlaybackResult.Failure(PlaybackError.OperationCanceled, "提交所属管线已退役。"));
             _committing = null;
             if (!preservePending && _pending is not null)
             {
@@ -454,13 +489,15 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (generation != _generation || !ReferenceEquals(_committing, request)) return;
+            if (generation != _generation || !ReferenceEquals(_committing, request))
+                return;
             var failedRequestId = _pending?.Id ?? request.Id;
             RejectAllLocked(error.Message, PlaybackError.PlayFailed);
             RefreshLocked("Faulted", error.Message, requestId: failedRequestId);
             SignalLocked();
         }
-        FluxMediaLog.Write(LogLevel.Error, nameof(PlaybackRateController), _instanceId, $"Event={eventName} RequestId={request.Id} Generation={generation}", error);
+        Log.Error(nameof(PlaybackRateController),
+            $"SessionId={_instanceId} Event={eventName} RequestId={request.Id} Generation={generation}", error);
         CommitFaulted?.Invoke(generation, error);
         Notify();
     }
@@ -472,7 +509,8 @@ internal sealed class PlaybackRateController
     {
         lock (_sync)
         {
-            if (request.Deferred || !ReferenceEquals(_pending, request)) return;
+            if (request.Deferred || !ReferenceEquals(_pending, request))
+                return;
             _pending = null;
             FinishLocked(request, PlaybackResult.Failure(PlaybackError.OperationCanceled, reason));
             RefreshLocked("Abandoned", reason, requestId: request.Id);
@@ -502,7 +540,8 @@ internal sealed class PlaybackRateController
     /// </summary>
     private void ApplyWithoutAudioLocked()
     {
-        if ((!_hasAudio || _audioEnded) && _suspensions == 0 && _committing is null) ApplyPendingLocked();
+        if ((!_hasAudio || _audioEnded) && _suspensions == 0 && _committing is null)
+            ApplyPendingLocked();
     }
 
     /// <summary>
@@ -510,7 +549,8 @@ internal sealed class PlaybackRateController
     /// </summary>
     private void ApplyPendingLocked()
     {
-        if (_pending is null) return;
+        if (_pending is null)
+            return;
         var request = _pending;
         _pending = null;
         RefreshLocked("Applied", appliedRate: request.Rate, requestId: request.Id, clearError: true);
@@ -533,8 +573,10 @@ internal sealed class PlaybackRateController
     private void RejectAllLocked(string reason, PlaybackError error)
     {
         var result = PlaybackResult.Failure(error, reason);
-        if (_pending is not null) FinishLocked(_pending, result);
-        if (_committing is not null) FinishLocked(_committing, result);
+        if (_pending is not null)
+            FinishLocked(_pending, result);
+        if (_committing is not null)
+            FinishLocked(_committing, result);
         _pending = _committing = null;
     }
 
@@ -579,10 +621,14 @@ internal sealed class PlaybackRateController
     /// </summary>
     private void Notify()
     {
-        try { Changed?.Invoke(); }
+        try
+        {
+            Changed?.Invoke();
+        }
         catch (Exception error)
         {
-            FluxMediaLog.Write(LogLevel.Warning, nameof(PlaybackRateController), _instanceId, "Event=RateNotificationFailed", error);
+            Log.Write(LogLevel.Warning, nameof(PlaybackRateController),
+                $"SessionId={_instanceId} Event=RateNotificationFailed", error);
         }
     }
 

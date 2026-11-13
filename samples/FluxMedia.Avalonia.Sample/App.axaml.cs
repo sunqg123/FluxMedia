@@ -3,7 +3,6 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using FluxMedia.Avalonia.Sample.Views;
 using FluxMedia.Playback;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace FluxMedia.Avalonia.Sample;
@@ -41,10 +40,9 @@ public sealed partial class App : Application
                 {
                     FluxEngine.Shutdown();
                 }
-                catch (Exception exception)
+                catch (Exception)
                 {
-                    // 引擎日志可能已经关闭，保留独立的退出错误记录。
-                    Trace.TraceError("Event=EngineShutdownFailed Exception={0}", exception);
+                    // 引擎已记录关闭错误，退出流程继续完成。
                 }
             };
             desktop.MainWindow = new MainWindow();

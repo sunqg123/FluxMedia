@@ -86,8 +86,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     /// <summary>
     /// 初始化 FFmpeg 数据包队列所需的状态和资源。
     /// </summary>
-    public FFmpegPacketQueue(
-        int capacity, AVRational timeBase = default, TimeSpan? fallbackPacketDuration = null, bool requireKeyFrameAfterOverflow = false)
+    public FFmpegPacketQueue(int capacity, AVRational timeBase = default, TimeSpan? fallbackPacketDuration = null, bool requireKeyFrameAfterOverflow = false)
     {
         _requireKeyFrameAfterOverflow = requireKeyFrameAfterOverflow;
         _timeBase = timeBase.num == 0 || timeBase.den == 0 ? new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE } : timeBase;
@@ -226,7 +225,8 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
         lock (_sync)
         {
             ThrowIfDisposed();
-            if (!_channel.Writer.TryWrite(packet)) return false;
+            if (!_channel.Writer.TryWrite(packet))
+                return false;
             OnPacketEnqueued(packet);
             return true;
         }
@@ -282,7 +282,8 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     {
         lock (_sync)
         {
-            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
+                return;
             _completed = true;
             _channel.Writer.TryComplete();
             while (_channel.Reader.TryRead(out var packet))
@@ -339,9 +340,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
 
             if (_firstTimestamp is not null && _lastTimestamp is not null)
             {
-                _bufferedDuration = _lastTimestamp.Value >= _firstTimestamp.Value
-                    ? _lastTimestamp.Value - _firstTimestamp.Value
-                    : _fallbackPacketDuration * count;
+                _bufferedDuration = _lastTimestamp.Value >= _firstTimestamp.Value ? _lastTimestamp.Value - _firstTimestamp.Value : _fallbackPacketDuration * count;
             }
             else
             {
@@ -368,9 +367,11 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     private TimeSpan? GetPacketTimestamp(FFmpegPacketLease packet)
     {
         var raw = packet.Packet->dts != ffmpeg.AV_NOPTS_VALUE ? packet.Packet->dts : packet.Packet->pts;
-        if (raw == ffmpeg.AV_NOPTS_VALUE) return null;
+        if (raw == ffmpeg.AV_NOPTS_VALUE)
+            return null;
         var seconds = raw * ffmpeg.av_q2d(_timeBase);
-        if (double.IsNaN(seconds) || double.IsInfinity(seconds)) return null;
+        if (double.IsNaN(seconds) || double.IsInfinity(seconds))
+            return null;
         var timestamp = TimeSpan.FromSeconds(seconds) - _timestampOrigin;
         return timestamp < TimeSpan.Zero ? TimeSpan.Zero : timestamp;
     }

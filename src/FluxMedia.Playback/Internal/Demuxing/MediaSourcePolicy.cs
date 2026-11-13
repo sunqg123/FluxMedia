@@ -65,7 +65,10 @@ internal static class MediaSourcePolicy
                     error = $"媒体文件不存在：{path}";
                     return false;
                 }
-                actualSource = source with { Uri = path };
+                actualSource = source with
+                {
+                    Uri = path
+                };
                 return true;
 
             case MediaSourceKind.NetworkStream:
@@ -85,7 +88,10 @@ internal static class MediaSourcePolicy
                     error = "网络媒体地址缺少主机。";
                     return false;
                 }
-                actualSource = source with { Uri = address };
+                actualSource = source with
+                {
+                    Uri = address
+                };
                 return true;
 
             default:
@@ -99,8 +105,10 @@ internal static class MediaSourcePolicy
     /// </summary>
     internal static string? GetProtocol(MediaSource? source)
     {
-        if (source is null) return null;
-        if (source.Kind == MediaSourceKind.File) return "file";
+        if (source is null)
+            return null;
+        if (source.Kind == MediaSourceKind.File)
+            return "file";
         return TryGetScheme(source.Uri, out var scheme) ? scheme : null;
     }
 
@@ -109,8 +117,10 @@ internal static class MediaSourcePolicy
     /// </summary>
     private static bool IsFilePath(string value)
     {
-        if (value.Length == 0) return false;
-        if (value[0] is '/' or '\\') return true;
+        if (value.Length == 0)
+            return false;
+        if (value[0] is '/' or '\\')
+            return true;
         return value.Length >= 2 && char.IsLetter(value[0]) && value[1] == ':';
     }
 
@@ -120,12 +130,15 @@ internal static class MediaSourcePolicy
     private static bool TryGetScheme(string? value, out string scheme)
     {
         scheme = string.Empty;
-        if (string.IsNullOrWhiteSpace(value)) return false;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
         var address = value!.TrimStart();
         var separator = address.IndexOf(':');
-        if (separator <= 0) return false;
+        if (separator <= 0)
+            return false;
         var candidate = address.Substring(0, separator);
-        if (!Uri.CheckSchemeName(candidate)) return false;
+        if (!Uri.CheckSchemeName(candidate))
+            return false;
         scheme = candidate.ToLowerInvariant();
         return true;
     }

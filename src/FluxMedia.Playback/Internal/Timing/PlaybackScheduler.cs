@@ -227,14 +227,16 @@ internal sealed class PlaybackScheduler
         _audioRate = PlaybackRatePolicy.Normalize(audio.PlaybackRate);
         var buffered = audio.BufferedDuration;
         var deviceDelay = audio.DeviceDelay;
-        if (audio.UpdatedAt == default) return null;
+        if (audio.UpdatedAt == default)
+            return null;
         var elapsed = DateTimeOffset.UtcNow - audio.UpdatedAt;
         if (elapsed < TimeSpan.Zero)
         {
             elapsed = TimeSpan.Zero;
         }
         // 快照中的音频已经播完时改用媒体时钟，不能永远等待旧位置。
-        if (elapsed >= buffered + deviceDelay) return null;
+        if (elapsed >= buffered + deviceDelay)
+            return null;
 
         return PlaybackClock.MediaTime(audio.PresentationTime.Value.TotalSeconds + elapsed.TotalSeconds * _audioRate);
     }
@@ -262,7 +264,8 @@ internal sealed class PlaybackScheduler
     /// </summary>
     private void Wait(TimeSpan delay, CancellationToken cancellationToken)
     {
-        if (delay <= TimeSpan.Zero) return;
+        if (delay <= TimeSpan.Zero)
+            return;
         var dueAt = DateTimeOffset.UtcNow + delay;
         while (delay > TimeSpan.Zero && !_shouldStop() && !cancellationToken.IsCancellationRequested)
         {

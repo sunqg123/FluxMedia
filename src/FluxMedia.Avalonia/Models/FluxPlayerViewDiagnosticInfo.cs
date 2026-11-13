@@ -20,40 +20,64 @@ public sealed record FluxPlayerViewDiagnosticInfo
     /// <summary>
     /// 是否使用 Avalonia 合成器。
     /// </summary>
-    public bool UsesAvaloniaCompositor { get; init; }
+    public bool UsesAvaloniaCompositor
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 是否零复制 GPU 呈现。
     /// </summary>
-    public bool IsZeroCopyGpuPresentation { get; init; }
+    public bool IsZeroCopyGpuPresentation
+    {
+        get; init;
+    }
 
     /// <summary>
     /// GPU 呈现错误。
     /// </summary>
-    public string? GpuPresentationError { get; init; }
+    public string? GpuPresentationError
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 已接收帧数量。
     /// </summary>
-    public long ReceivedFrameCount { get; init; }
+    public long ReceivedFrameCount
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 已渲染帧数量。
     /// </summary>
-    public long RenderedFrameCount { get; init; }
+    public long RenderedFrameCount
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 已替换帧数量。
     /// </summary>
-    public long ReplacedFrameCount { get; init; }
+    public long ReplacedFrameCount
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 最近位图上传耗时。
     /// </summary>
-    public TimeSpan LastBitmapUploadElapsed { get; init; }
+    public TimeSpan LastBitmapUploadElapsed
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 像素大小。
     /// </summary>
-    public PixelSize? PixelSize { get; init; }
+    public PixelSize? PixelSize
+    {
+        get; init;
+    }
 }

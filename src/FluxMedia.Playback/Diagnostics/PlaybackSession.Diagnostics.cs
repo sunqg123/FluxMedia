@@ -6,6 +6,16 @@ namespace FluxMedia.Playback;
 internal sealed partial class PlaybackSession
 {
     /// <summary>
+    /// 仅保护诊断参数描述的缓存。
+    /// </summary>
+    private readonly object _diagnosticDescriptionSync = new();
+
+    /// <summary>
+    /// 最近一次查询的媒体、配置和参数描述。
+    /// </summary>
+    private (MediaSource Source, PlaybackOptions Options, string Text)? _diagnosticDescription;
+
+    /// <summary>
     /// 按需读取同一媒体的事实，切换中无法稳定读取时返回空值。
     /// </summary>
     public PlaybackDiagnosticInfo? GetDiagnosticInfo()
@@ -13,7 +23,8 @@ internal sealed partial class PlaybackSession
         for (var attempt = 0; attempt < 2; attempt++)
         {
             var state = State;
-            if (state is PlaybackState.Opening or PlaybackState.Stopping) return null;
+            if (state is PlaybackState.Opening or PlaybackState.Stopping)
+                return null;
             var operation = Volatile.Read(ref _operationCts);
             var synchronization = _resyncSignal.Snapshot();
             var pipeline = Volatile.Read(ref _pipeline);
@@ -21,7 +32,8 @@ internal sealed partial class PlaybackSession
             var info = CurrentMediaInfo;
             var options = Volatile.Read(ref _currentOptions);
             var disposed = IsDisposed;
-            if (pipeline is not null && !pipeline.MatchesDiagnosticMedia(source, options)) continue;
+            if (pipeline is not null && !pipeline.MatchesDiagnosticMedia(source, options))
+                continue;
 
             var rate = _rates.Snapshot;
             var seek = _seeking.Operation;
@@ -37,7 +49,7 @@ internal sealed partial class PlaybackSession
                 State = state,
                 SourceKind = source?.Kind,
                 SourceUrl = source?.Uri,
-                FFmpegOpenOptions = source is null ? null : PlaybackFFmpegOptions.Describe(source, options),
+                FFmpegOpenOptions = source is null ? null : ReadFFmpegOptionsDescription(source, options),
                 Protocol = MediaSourcePolicy.GetProtocol(source),
                 Container = info?.ContainerFormat,
                 FrameRate = info?.VideoFrameRate,
@@ -87,9 +99,26 @@ internal sealed partial class PlaybackSession
             };
             if (IsDiagnosticContextCurrent(pipeline, source, info, options, operation, synchronization, state)
                 && disposed == IsDisposed && ReferenceEquals(seek, _seeking.Operation)
-                && ReferenceEquals(seekFrame, Volatile.Read(ref _activeSeek))) return diagnostic;
+                && ReferenceEquals(seekFrame, Volatile.Read(ref _activeSeek)))
+                return diagnostic;
         }
         return null;
+    }
+
+    /// <summary>
+    /// 同一媒体和配置复用描述，不参与播放流程。
+    /// </summary>
+    private string ReadFFmpegOptionsDescription(MediaSource source, PlaybackOptions options)
+    {
+        lock (_diagnosticDescriptionSync)
+        {
+            if (_diagnosticDescription is { } cached && ReferenceEquals(cached.Source, source)
+                && ReferenceEquals(cached.Options, options))
+                return cached.Text;
+            var text = PlaybackFFmpegOptions.Describe(source, options);
+            _diagnosticDescription = (source, options, text);
+            return text;
+        }
     }
 
     /// <summary>
@@ -139,16 +168,18 @@ internal sealed partial class PlaybackSession
         for (var attempt = 0; attempt < 2; attempt++)
         {
             var state = State;
-            if (state is PlaybackState.Opening or PlaybackState.Stopping) return null;
+            if (state is PlaybackState.Opening or PlaybackState.Stopping)
+                return null;
             var operation = Volatile.Read(ref _operationCts);
             var synchronization = _resyncSignal.Snapshot();
             var pipeline = Volatile.Read(ref _pipeline);
             var source = CurrentSource;
             var info = CurrentMediaInfo;
             var options = Volatile.Read(ref _currentOptions);
-            if (pipeline is not null && !pipeline.MatchesDiagnosticMedia(source, options)) continue;
+            if (pipeline is not null && !pipeline.MatchesDiagnosticMedia(source, options))
+                continue;
 
-            var result = _recording.GetResult(pipeline?.Demuxer);
+            var result = _recording.GetResult();
             var diagnostic = new PlaybackRecordingDiagnosticInfo
             {
                 State = result.State,
@@ -165,7 +196,11 @@ internal sealed partial class PlaybackSession
                 {
                     var file = new FileInfo(result.OutputPath);
                     var exists = file.Exists;
-                    diagnostic = diagnostic with { OutputFileExists = exists, OutputFileSize = exists ? file.Length : null };
+                    diagnostic = diagnostic with
+                    {
+                        OutputFileExists = exists,
+                        OutputFileSize = exists ? file.Length : null
+                    };
                 }
                 catch (Exception error) when (error is IOException or UnauthorizedAccessException
                     or System.Security.SecurityException or ArgumentException or NotSupportedException)
@@ -173,7 +208,8 @@ internal sealed partial class PlaybackSession
                     // 文件属性不可读时保留录制结果，不修改播放状态。
                 }
             }
-            if (IsDiagnosticContextCurrent(pipeline, source, info, options, operation, synchronization, state)) return diagnostic;
+            if (IsDiagnosticContextCurrent(pipeline, source, info, options, operation, synchronization, state))
+                return diagnostic;
         }
         return null;
     }

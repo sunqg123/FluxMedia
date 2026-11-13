@@ -18,16 +18,19 @@ internal static class FFmpegPacketReader
         {
             var signal = controlSignal?.Invoke();
             serviceControl?.Invoke();
-            if (isDisposed() || cancellationToken.IsCancellationRequested) yield break;
+            if (isDisposed() || cancellationToken.IsCancellationRequested)
+                yield break;
             reading ??= packets.WaitToReadAsync(cancellationToken).AsTask();
             if (!reading.IsCompleted && signal is not null)
             {
                 // 控制唤醒不取消或重复创建原有的包等待。
-                if (Task.WhenAny(reading, signal).GetAwaiter().GetResult() != reading) continue;
+                if (Task.WhenAny(reading, signal).GetAwaiter().GetResult() != reading)
+                    continue;
             }
             if (!reading.GetAwaiter().GetResult())
             {
-                if (!isDisposed() && !cancellationToken.IsCancellationRequested) yield return null;
+                if (!isDisposed() && !cancellationToken.IsCancellationRequested)
+                    yield return null;
                 yield break;
             }
             reading = null;

@@ -1,6 +1,5 @@
+using LogConverge.Sharp;
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.Playback;
 using System.Runtime.InteropServices;
 
@@ -31,7 +30,8 @@ internal static unsafe class FFmpegNativeRuntime
     {
         lock (SyncRoot)
         {
-            if (_isInitialized) return;
+            if (_isInitialized)
+                return;
             var loader = new NativeLibraryLoader(directory);
             var networkInitialized = false;
             try
@@ -51,19 +51,20 @@ internal static unsafe class FFmpegNativeRuntime
                 FFmpegLibraries.ValidateVersions();
                 var version = ffmpeg.av_version_info();
                 var result = ffmpeg.avformat_network_init();
-                if (result < 0) throw new InvalidOperationException($"FFmpeg 网络初始化失败：{result}。");
+                if (result < 0)
+                    throw new InvalidOperationException($"FFmpeg 网络初始化失败：{result}。");
                 networkInitialized = true;
-                FluxMediaLog.Write(LogLevel.Information, nameof(FFmpegNativeRuntime), Guid.Empty,
+                Log.Info(nameof(FFmpegNativeRuntime),
                     $"Event=FFmpegInitialized BindingVersion={FFmpegLibraries.BindingVersion} Version={version} RootPath={rootPath}");
                 _isInitialized = true;
             }
             catch (Exception exception)
             {
                 _isInitialized = false;
-                if (networkInitialized) ffmpeg.avformat_network_deinit();
+                if (networkInitialized)
+                    ffmpeg.avformat_network_deinit();
                 var message = $"FFmpeg 初始化失败：{exception.Message}";
-                FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegNativeRuntime), Guid.Empty,
-                    $"Event=FFmpegInitializeFailed Error={exception.Message}", exception);
+
                 throw new InvalidOperationException(message, exception);
             }
         }
@@ -87,7 +88,8 @@ internal static unsafe class FFmpegNativeRuntime
     {
         lock (SyncRoot)
         {
-            if (!_isInitialized) return;
+            if (!_isInitialized)
+                return;
             try
             {
                 ffmpeg.avformat_network_deinit();

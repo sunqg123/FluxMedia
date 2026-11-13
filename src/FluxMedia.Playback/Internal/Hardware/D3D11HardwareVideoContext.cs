@@ -1,6 +1,5 @@
+using LogConverge.Sharp;
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Native;
 using Silk.NET.Core.Native;
@@ -20,11 +19,6 @@ namespace FluxMedia.Playback.Internal.Hardware;
 /// </summary>
 internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
 {
-    /// <summary>
-    /// 实例标识。
-    /// </summary>
-    private readonly Guid _instanceId;
-
     /// <summary>
     /// 供 FFmpeg 选择硬件像素格式的回调。
     /// </summary>
@@ -73,9 +67,8 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
     /// <summary>
     /// 初始化 D3D11 硬件视频上下文所需的状态和资源。
     /// </summary>
-    private D3D11HardwareVideoContext(Guid instanceId, ComPtr<D3DDevice> device, ComPtr<D3DDeviceContext> deviceContext)
+    private D3D11HardwareVideoContext(ComPtr<D3DDevice> device, ComPtr<D3DDeviceContext> deviceContext)
     {
-        _instanceId = instanceId;
         _device = device;
         _deviceContext = deviceContext;
         _getFormat = SelectHardwarePixelFormat;
@@ -103,15 +96,14 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
                 return false;
             }
 
-            CreateDevice(preferredAdapterLuid, out var device, out var deviceContext, out var adapterDescription);
-            var created = new D3D11HardwareVideoContext(instanceId, device, deviceContext)
+            CreateDevice(preferredAdapterLuid, out var device, out var deviceContext);
+            var created = new D3D11HardwareVideoContext(device, deviceContext)
             {
                 _hardwarePixelFormat = hardwarePixelFormat
             };
             context = created;
             created.InitializeFFmpegDevice();
-            FluxMediaLog.Write(
-                LogLevel.Information, nameof(D3D11HardwareVideoContext), instanceId, $"Event=HardwareVideoDeviceCreated Backend=D3D11VA Adapter={adapterDescription} PixelFormat={hardwarePixelFormat}");
+
             return true;
         }
         catch (Exception ex)
@@ -119,8 +111,8 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
             error = ex.Message;
             context?.Dispose();
             context = null;
-            FluxMediaLog.Write(
-                LogLevel.Warning, nameof(D3D11HardwareVideoContext), instanceId, $"Event=HardwareVideoDeviceCreateFailed Backend=D3D11VA Error={ex.Message}", ex);
+            Log.Write(LogLevel.Warning, nameof(D3D11HardwareVideoContext),
+                $"SessionId={instanceId} Event=HardwareVideoDeviceCreateFailed Backend=D3D11VA Error={ex.Message}", ex);
             return false;
         }
     }
@@ -226,7 +218,7 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
     /// <summary>
     /// 创建硬件解码所需的图形设备。
     /// </summary>
-    private static void CreateDevice(byte[]? preferredAdapterLuid, out ComPtr<D3DDevice> device, out ComPtr<D3DDeviceContext> deviceContext, out string adapterDescription)
+    private static void CreateDevice(byte[]? preferredAdapterLuid, out ComPtr<D3DDevice> device, out ComPtr<D3DDeviceContext> deviceContext)
     {
         using var dxgi = new DXGI(DXGI.CreateDefaultContext(["DXGI.dll"]));
         using var d3d11 = new D3D11(D3D11.CreateDefaultContext(["d3d11.dll"]));
@@ -245,10 +237,6 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
         deviceContext = default;
         D3DFeatureLevel actualFeatureLevel;
         ThrowHResult(d3d11.CreateDevice(adapter, D3DDriverType.Unknown, IntPtr.Zero, (uint)(CreateDeviceFlag.VideoSupport | CreateDeviceFlag.BgraSupport), featureLevels, 4, D3D11.SdkVersion, device.GetAddressOf(), &actualFeatureLevel, deviceContext.GetAddressOf()));
-
-        AdapterDesc description;
-        ThrowHResult(adapter.GetDesc(&description));
-        adapterDescription = Marshal.PtrToStringUni((nint)description.Description) ?? "Unknown";
     }
 
     /// <summary>

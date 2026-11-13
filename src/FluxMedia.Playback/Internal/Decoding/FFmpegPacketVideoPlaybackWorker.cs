@@ -1,6 +1,5 @@
+using LogConverge.Sharp;
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Extensions;
 using FluxMedia.FFmpeg.Native;
@@ -117,8 +116,8 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             if (codecOpenResult < 0 && (d3d11Hardware is not null || vaapiHardware is not null) && _options.VideoAcceleration == VideoAccelerationMode.Auto)
             {
                 var failedBackend = d3d11Hardware is not null ? "D3D11VA" : "VAAPI";
-                FluxMediaLog.Write(
-                    LogLevel.Warning, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=HardwareDecoderOpenFallback Backend={failedBackend} Error={FFmpegErrorHelper.GetErrorMessage(codecOpenResult)}");
+                Log.Warning(nameof(FFmpegPacketVideoPlaybackWorker),
+                    $"SessionId={_context.InstanceId} Event=HardwareDecoderOpenFallback Backend={failedBackend} Error={FFmpegErrorHelper.GetErrorMessage(codecOpenResult)}");
                 d3d11Hardware?.Dispose();
                 d3d11Hardware = null;
                 vaapiHardware?.Dispose();
@@ -152,7 +151,8 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             TimeSpan? prerollDropUntil = initialPosition > TimeSpan.Zero ? initialPosition : null;
             var scheduler = new PlaybackScheduler(timingMode, _context.PlaybackRate, () => _disposed || _context.Resync().Version != lastResyncVersion, _callbacks.AudioClock, _callbacks.BufferedDuration, _callbacks.BufferedPacketCount, minBufferDuration: _context.Source.Kind == MediaSourceKind.File ? TimeSpan.Zero : TimeSpan.FromMilliseconds(500), maxLowLatencyDelay: _options.Network.MaxNetworkFrameDelay);
             var lastTimestamp = TimeSpan.Zero;
-            if (initialPosition > TimeSpan.Zero) scheduler.Reset();
+            if (initialPosition > TimeSpan.Zero)
+                scheduler.Reset();
             var wasPaused = false;
 
             foreach (var packetLease in FFmpegPacketReader.ReadWithDrain(_input.Packets, () => _disposed, cancellationToken))
@@ -216,7 +216,8 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         VideoFrameSchedulingDecision scheduling = default;
                         while (!_disposed && !cancellationToken.IsCancellationRequested)
                         {
-                            if (_context.Resync().Version != lastResyncVersion) break;
+                            if (_context.Resync().Version != lastResyncVersion)
+                                break;
                             if (_context.IsPaused())
                             {
                                 scheduler.ResetPresentationClock();
@@ -231,7 +232,8 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                             }
                         }
 
-                        if (_disposed || cancellationToken.IsCancellationRequested) break;
+                        if (_disposed || cancellationToken.IsCancellationRequested)
+                            break;
 
                         // 等待旧画面时收到定位请求，立即刷新解码器，不能继续提交旧帧。
                         if (ApplyResyncIfNeeded(codecContext, frame, scheduler, ref sequence, ref lastTimestamp, ref lastResyncVersion, ref prerollDropUntil))
@@ -275,7 +277,6 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         {
                             ffmpeg.av_frame_unref(softwareFrame);
                         }
-
                     }
                 }
             }
@@ -283,18 +284,23 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
         catch (OperationCanceledException)
         {
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             failed = true;
-            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=PacketVideoWorkerFault SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Error={ex.Message}", ex);
+
             throw;
         }
         finally
         {
             var cleanupFailure = ReleaseDecoderResources(codecContext, frame, softwareFrame, swsContext, d3d11Hardware, vaapiHardware);
-            if (!failed && cleanupFailure is not null) throw cleanupFailure;
+            if (cleanupFailure is not null)
+            {
+                if (!failed)
+                    throw cleanupFailure;
+                Log.Error(nameof(FFmpegPacketVideoPlaybackWorker),
+                    $"SessionId={_context.InstanceId} Event=VideoCleanupFailed", cleanupFailure);
+            }
         }
-
     }
 
     /// <summary>
@@ -367,11 +373,8 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
         {
             return d3d11Hardware.ConvertFrame(frame, new VideoFormat(frame->width, frame->height, frameRate <= 0 ? 25 : frameRate, CorePixelFormat.Nv12), timestamp, publishedSequence);
         }
-        catch (Exception ex) when (_options.VideoAcceleration == VideoAccelerationMode.Auto)
+        catch (Exception) when (_options.VideoAcceleration == VideoAccelerationMode.Auto)
         {
-            FluxMediaLog.Write(
-                LogLevel.Warning, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, $"Event=HardwarePresentationFallback Backend=D3D11VA Error={ex.Message}", ex);
-
             return null;
         }
     }
@@ -417,7 +420,6 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
         try
         {
             frameToPublish!.BindEpoch(_frameEpoch, _producerEpoch);
-            // 视频链路①触发：把当前帧交给帧泵。
             _callbacks.FrameReady(frameToPublish);
             frameToPublish = null;
         }
@@ -449,11 +451,13 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
         // 硬件上下文释放失败也不跳过其它解码资源。
         void Release(Action release)
         {
-            try { release(); }
+            try
+            {
+                release();
+            }
             catch (Exception exception)
             {
                 cleanupErrors.Add(exception);
-                FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketVideoPlaybackWorker), _context.InstanceId, "Event=VideoCleanupFailed", exception);
             }
         }
     }

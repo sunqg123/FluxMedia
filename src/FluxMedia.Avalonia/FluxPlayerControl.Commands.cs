@@ -1,9 +1,8 @@
+using LogConverge.Sharp;
 using Avalonia.Threading;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Errors;
-using FluxMedia.Core.Logging;
-using FluxMedia.Playback;
 using FluxMedia.Avalonia.Bindings;
+using FluxMedia.Core.Errors;
+using FluxMedia.Playback;
 
 namespace FluxMedia.Avalonia;
 
@@ -33,7 +32,8 @@ public sealed partial class FluxPlayerControl
     private async Task ExecutePlaybackAsync(Func<Player, ValueTask<PlaybackResult>> operation)
     {
         var player = Player;
-        if (player is null || player.IsDisposed || IsBusy) return;
+        if (player is null || player.IsDisposed || IsBusy)
+            return;
         var version = Interlocked.Read(ref _subscriptionVersion);
         SetAndRaise(IsBusyProperty, ref _isBusy, true);
         SetAndRaise(ErrorTextProperty, ref _errorText, string.Empty);
@@ -47,9 +47,10 @@ public sealed partial class FluxPlayerControl
         }
         catch (Exception exception)
         {
-            if (IsCurrentPlayer(player, version)) ReportError(exception.Message);
-            FluxMediaLog.Write(LogLevel.Warning, nameof(FluxPlayerControl), player.InstanceId,
-                "Event=PlaybackControlFailed", exception);
+            if (IsCurrentPlayer(player, version))
+                ReportError(exception.Message);
+            Log.Write(LogLevel.Warning, nameof(FluxPlayerControl),
+                $"SessionId={player.InstanceId} Event=PlaybackControlFailed", exception);
         }
         finally
         {
@@ -80,7 +81,8 @@ public sealed partial class FluxPlayerControl
     private void SubscribePlayer()
     {
         UnsubscribePlayer();
-        if (!_isAttached) return;
+        if (!_isAttached)
+            return;
         _subscribedPlayer = Player;
         if (_subscribedPlayer is not null)
         {
@@ -108,7 +110,8 @@ public sealed partial class FluxPlayerControl
             _presentation.Dispose();
             SetAndRaise(PresentationProperty, ref _presentation, null);
         }
-        if (_subscribedPlayer is not null) _subscribedPlayer.Faulted -= OnPlayerFaulted;
+        if (_subscribedPlayer is not null)
+            _subscribedPlayer.Faulted -= OnPlayerFaulted;
         _subscribedPlayer = null;
         UpdateControlBar();
     }
@@ -118,8 +121,10 @@ public sealed partial class FluxPlayerControl
     /// </summary>
     private void OnPresentationUpdated(bool sourceChanged)
     {
-        if (!_isAttached) return;
-        if (sourceChanged) SetAndRaise(ErrorTextProperty, ref _errorText, string.Empty);
+        if (!_isAttached)
+            return;
+        if (sourceChanged)
+            SetAndRaise(ErrorTextProperty, ref _errorText, string.Empty);
         RefreshCommands();
         ShowControls();
     }
@@ -132,7 +137,8 @@ public sealed partial class FluxPlayerControl
         var version = Interlocked.Read(ref _subscriptionVersion);
         Dispatcher.UIThread.Post(() =>
         {
-            if (sender is Player player && IsCurrentPlayer(player, version)) ReportError(error.Message);
+            if (sender is Player player && IsCurrentPlayer(player, version))
+                ReportError(error.Message);
         });
     }
 
@@ -157,12 +163,15 @@ public sealed partial class FluxPlayerControl
     private Task RequestFullScreen()
     {
         ShowControls();
-        try { _fullScreenRequested?.Invoke(this, EventArgs.Empty); }
+        try
+        {
+            _fullScreenRequested?.Invoke(this, EventArgs.Empty);
+        }
         catch (Exception exception)
         {
             ReportError(exception.Message);
-            FluxMediaLog.Write(LogLevel.Warning, nameof(FluxPlayerControl), Player?.InstanceId ?? Guid.Empty,
-                "Event=FullScreenRequestFailed", exception);
+            Log.Write(LogLevel.Warning, nameof(FluxPlayerControl),
+                $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=FullScreenRequestFailed", exception);
         }
         return Task.CompletedTask;
     }

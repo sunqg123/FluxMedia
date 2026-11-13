@@ -12,8 +12,10 @@ internal static class PlaybackClock
     /// </summary>
     public static TimeSpan MediaTime(double seconds)
     {
-        if (seconds <= 0) return TimeSpan.Zero;
-        if (seconds >= TimeSpan.MaxValue.TotalSeconds) return TimeSpan.MaxValue;
+        if (seconds <= 0)
+            return TimeSpan.Zero;
+        if (seconds >= TimeSpan.MaxValue.TotalSeconds)
+            return TimeSpan.MaxValue;
         return TimeSpan.FromSeconds(seconds);
     }
 

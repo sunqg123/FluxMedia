@@ -1,3 +1,4 @@
+using LogConverge.Sharp;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -5,8 +6,6 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.Playback;
 using System.Diagnostics;
@@ -60,7 +59,17 @@ public sealed class FluxPlayerView : UserControl
     /// <summary>
     /// 是否已安排一次界面渲染。
     /// </summary>
-    private int _renderQueued;
+    private bool _renderQueued;
+
+    /// <summary>
+    /// 清空或换播放器后拒绝旧的显示提交。
+    /// </summary>
+    private long _displayVersion;
+
+    /// <summary>
+    /// 区分可视树的每次附着，过滤过期初始化。
+    /// </summary>
+    private long _attachmentVersion;
 
     /// <summary>
     /// 控件是否已从可视树移除。
@@ -101,11 +110,6 @@ public sealed class FluxPlayerView : UserControl
     /// 实际提交显示的视频帧总数。
     /// </summary>
     private long _renderedFrameCount;
-
-    /// <summary>
-    /// 每代仅记录一次实际显示提交。
-    /// </summary>
-    private long _lastPresentedTimeline;
 
     /// <summary>
     /// 渲染前被更新帧替换的帧数。
@@ -166,44 +170,51 @@ public sealed class FluxPlayerView : UserControl
     }
 
     /// <summary>
-    /// 清除当前位图和等待显示的帧。
+    /// 清除 CPU、GPU 画面，并作废此前的显示提交。
     /// </summary>
     public void Clear()
     {
+        Dispatcher.UIThread.VerifyAccess();
         lock (_frameSync)
         {
-            _bitmap?.Dispose();
-            _bitmap = null;
+            _displayVersion++;
             _latestFrame?.Dispose();
             _latestFrame = null;
-            Interlocked.Exchange(ref _renderQueued, 0);
+            _renderQueued = false;
         }
-
+        if (_gpuVisual is not null)
+            _gpuVisual.Surface = null;
+        _gpuFramePresented = false;
         _image.Source = null;
+        _image.IsVisible = true;
+        _bitmap?.Dispose();
+        _bitmap = null;
         _image.InvalidateVisual();
     }
 
     /// <summary>
-    /// 控件显示时关联播放器和显示资源。
+    /// 附着后重新关联播放器并初始化显示资源。
     /// </summary>
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         _isDetached = false;
-        InitializeGpuPresenter();
+        var version = ++_attachmentVersion;
         AttachPlayer(Player);
         SubscribeToPlayer();
+        _ = InitializeGpuPresenterAsync(version);
     }
 
     /// <summary>
-    /// 控件移除时解除订阅并清理显示资源。
+    /// 移除时作废旧任务，再解除订阅和释放资源。
     /// </summary>
     protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
     {
         _isDetached = true;
+        _attachmentVersion++;
         UnsubscribeFromPlayer();
-        DisposeGpuPresenter();
         Clear();
+        DisposeGpuPresenter();
         base.OnDetachedFromVisualTree(e);
     }
 
@@ -250,7 +261,9 @@ public sealed class FluxPlayerView : UserControl
         }
 
         UnsubscribeFromPlayer();
-        _attachedPlayer = player;
+        _attachedPlayer?.ConfigureVideoOutput(new VideoOutputCapabilities());
+        lock (_frameSync)
+            _attachedPlayer = player;
         Clear();
         SubscribeToPlayer();
     }
@@ -260,8 +273,8 @@ public sealed class FluxPlayerView : UserControl
     /// </summary>
     private void SubscribeToPlayer()
     {
-        if (_isDetached || _isSubscribed || _attachedPlayer is null) return;
-        // 视频链路⑥订阅：Player 帧事件交给 OnVideoFrameReady。
+        if (_isDetached || _isSubscribed || _attachedPlayer is null)
+            return;
         _attachedPlayer.VideoFrameReady += OnVideoFrameReady;
         _isSubscribed = true;
     }
@@ -271,75 +284,70 @@ public sealed class FluxPlayerView : UserControl
     /// </summary>
     private void UnsubscribeFromPlayer()
     {
-        if (!_isSubscribed || _attachedPlayer is null) return;
+        if (!_isSubscribed || _attachedPlayer is null)
+            return;
         _attachedPlayer.VideoFrameReady -= OnVideoFrameReady;
         _isSubscribed = false;
     }
 
     /// <summary>
-    /// 保留最新帧，并合并界面渲染请求。
+    /// 只接收当前播放器的帧，并合并界面渲染请求。
     /// </summary>
     private void OnVideoFrameReady(object? sender, PlaybackVideoFrameEventArgs args)
     {
-        if (_isDetached || !args.Frame.IsCurrent) return;
-        // 视频链路⑥接收：保留租约，供 UI 线程稍后显示。
-        var lease = args.Frame.Retain();
-        Interlocked.Increment(ref _receivedFrameCount);
+        long version;
         lock (_frameSync)
         {
+            if (_isDetached || !ReferenceEquals(sender, _attachedPlayer) || !args.Frame.IsCurrent)
+                return;
+            var lease = args.Frame.Retain();
+            Interlocked.Increment(ref _receivedFrameCount);
             if (_latestFrame is not null)
             {
                 _latestFrame.Dispose();
                 Interlocked.Increment(ref _replacedFrameCount);
             }
             _latestFrame = lease;
-            if (Interlocked.Exchange(ref _renderQueued, 1) == 1) return;
+            if (_renderQueued)
+                return;
+            _renderQueued = true;
+            version = _displayVersion;
         }
-
-        // 视频链路⑦调度：切到 UI 线程处理最新帧。
-        Dispatcher.UIThread.Post(RenderLatestFrame, DispatcherPriority.Render);
+        Dispatcher.UIThread.Post(() => RenderLatestFrame(version), DispatcherPriority.Render);
     }
 
     /// <summary>
-    /// 取出最新帧，选择 GPU 或位图显示。
+    /// 当前显示代次才可以取帧或启动 GPU 提交。
     /// </summary>
-    private void RenderLatestFrame()
+    private void RenderLatestFrame(long version)
     {
-        if (_isDetached)
-        {
-            ReleasePendingFrame();
-            return;
-        }
-
         VideoFrameLease? lease;
         lock (_frameSync)
         {
+            if (_isDetached || version != _displayVersion)
+                return;
             lease = _latestFrame;
             _latestFrame = null;
         }
-
-        if (lease is null) { Interlocked.Exchange(ref _renderQueued, 0); return; }
+        if (lease is null)
+        {
+            CompleteRender(version);
+            return;
+        }
+        var presenter = _gpuPresenter;
+        if (lease.Frame.IsCurrent && lease.Frame.GpuSurface is not null && presenter is not null)
+        {
+            _ = PresentGpuFrameAsync(lease, presenter, version);
+            return;
+        }
         try
         {
-            if (!lease.Frame.IsCurrent) { Interlocked.Exchange(ref _renderQueued, 0); return; }
-            // 视频链路⑧显示：按帧类型进入 GPU 或 CPU 显示路径。
-            if (lease.Frame.GpuSurface is not null && _gpuPresenter is not null)
-            {
-                _ = PresentGpuFrameAsync(lease);
-                lease = null;
-                return;
-            }
-
-            Interlocked.Exchange(ref _renderQueued, 0);
             RenderFrame(lease.Frame);
         }
         finally
         {
-            lease?.Dispose();
-            if (lease is not null)
-            {
-                QueuePendingFrameIfNeeded();
-            }
+            lease.Dispose();
+            CompleteRender(version);
         }
     }
 
@@ -348,48 +356,29 @@ public sealed class FluxPlayerView : UserControl
     /// </summary>
     private void RenderFrame(VideoFrame frame)
     {
-        if (!frame.IsCurrent || frame.Format.PixelFormat != FluxPixelFormat.Bgra32 || frame.Format.Width <= 0 || frame.Format.Height <= 0 || frame.Buffer.IsEmpty) return;
+        if (!frame.IsCurrent || frame.Format.PixelFormat != FluxPixelFormat.Bgra32 || frame.Format.Width <= 0 || frame.Format.Height <= 0 || frame.Buffer.IsEmpty)
+            return;
         var startedAt = Stopwatch.GetTimestamp();
         EnsureBitmap(frame.Format.Width, frame.Format.Height);
-        if (_bitmap is null) return;
+        if (_bitmap is null)
+            return;
         using (var framebuffer = _bitmap.Lock())
         {
             CopyFrame(frame, framebuffer);
         }
-        if (!frame.IsCurrent) return;
+        if (!frame.IsCurrent)
+            return;
         if (!ReferenceEquals(_image.Source, _bitmap))
         {
             _image.Source = _bitmap;
         }
         Interlocked.Exchange(ref _lastUploadElapsedTicks, ElapsedSince(startedAt).Ticks);
         Interlocked.Increment(ref _renderedFrameCount);
+        if (_gpuVisual is not null)
+            _gpuVisual.Surface = null;
+        _gpuFramePresented = false;
         _image.IsVisible = true;
         _image.InvalidateVisual();
-        LogTimelinePresentation(frame, "CPU");
-    }
-
-    /// <summary>
-    /// 将首个显示提交与核心时间线对应起来。
-    /// </summary>
-    private void LogTimelinePresentation(VideoFrame frame, string backend)
-    {
-        if (!frame.IsCurrent || frame.TimelineId == 0 || frame.TimelineId == _lastPresentedTimeline) return;
-        _lastPresentedTimeline = frame.TimelineId;
-        FluxMediaLog.Write(LogLevel.Information, nameof(FluxPlayerView), Player?.InstanceId ?? Guid.Empty,
-            $"Event=VideoTimelinePresented Timeline={frame.TimelineId} Timestamp={frame.Timestamp} Backend={backend}");
-    }
-
-    /// <summary>
-    /// 释放尚未提交显示的帧租约。
-    /// </summary>
-    private void ReleasePendingFrame()
-    {
-        lock (_frameSync)
-        {
-            _latestFrame?.Dispose();
-            _latestFrame = null;
-            Interlocked.Exchange(ref _renderQueued, 0);
-        }
     }
 
     /// <summary>
@@ -398,82 +387,112 @@ public sealed class FluxPlayerView : UserControl
     private void EnsureBitmap(int width, int height)
     {
         var pixelSize = new PixelSize(width, height);
-        if (_bitmap is not null && _bitmap.PixelSize == pixelSize) return;
+        if (_bitmap is not null && _bitmap.PixelSize == pixelSize)
+            return;
         _bitmap?.Dispose();
         _bitmap = new WriteableBitmap(pixelSize, new Vector(96, 96), AvaloniaPixelFormat.Bgra8888, AlphaFormat.Unpremul);
     }
 
     /// <summary>
-    /// 异步创建合成器的 GPU 显示资源。
+    /// 只为当前附着创建显示资源，旧初始化结果直接丢弃。
     /// </summary>
-    private async void InitializeGpuPresenter()
+    private async Task InitializeGpuPresenterAsync(long version)
     {
+        GpuVideoPresenter? created = null;
         try
         {
             var elementVisual = ElementComposition.GetElementVisual(this);
-            if (elementVisual is null) return;
+            if (elementVisual is null)
+                return;
             var compositor = elementVisual.Compositor;
             var interop = await compositor.TryGetCompositionGpuInterop();
-            if (_isDetached || interop is null) return;
-            var surface = compositor.CreateDrawingSurface();
-            _gpuPresenter = new GpuVideoPresenter(surface, interop);
-            _gpuVisual = compositor.CreateSurfaceVisual();
-            _gpuVisual.Surface = surface;
-            UpdateGpuVisualLayout(_gpuVisual, Bounds.Size);
-            ElementComposition.SetElementChildVisual(this, _gpuVisual);
+            if (_isDetached || version != _attachmentVersion || interop is null)
+                return;
+            created = new GpuVideoPresenter(compositor.CreateDrawingSurface(), interop);
+            var visual = compositor.CreateSurfaceVisual();
+            UpdateGpuVisualLayout(visual, Bounds.Size);
+            _gpuPresenter = created;
+            _gpuVisual = visual;
+            created = null;
+            ElementComposition.SetElementChildVisual(this, visual);
             ConfigurePlayerVideoOutput();
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _gpuPresentationError = ex.Message;
-            ConfigurePlayerVideoOutput(disableGpu: true);
+            if (!_isDetached && version == _attachmentVersion)
+            {
+                _gpuPresentationError = exception.Message;
+                Log.Write(LogLevel.Warning, nameof(FluxPlayerView),
+                    $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=GpuPresenterInitFailed", exception);
+                DisposeGpuPresenter();
+            }
+        }
+        finally
+        {
+            if (created is not null)
+                await DisposeGpuPresenterAsync(created, _attachedPlayer?.InstanceId ?? Guid.Empty);
         }
     }
 
     /// <summary>
-    /// 提交 GPU 帧，失败时切换为 CPU 输出。
+    /// 提交完成后再次核对代次，旧任务不恢复已清空的画面。
     /// </summary>
-    private async Task PresentGpuFrameAsync(VideoFrameLease lease)
+    private async Task PresentGpuFrameAsync(VideoFrameLease lease, GpuVideoPresenter presenter, long version)
     {
         try
         {
             var surface = lease.Frame.GpuSurface;
-            var presenter = _gpuPresenter;
-            if (surface is null || presenter is null || !lease.Frame.IsCurrent) return;
+            if (surface is null || !lease.Frame.IsCurrent || !IsCurrentDisplay(version, presenter))
+                return;
             await presenter.PresentAsync(surface);
-            if (!lease.Frame.IsCurrent) return;
+            if (!lease.Frame.IsCurrent || !IsCurrentDisplay(version, presenter))
+                return;
+            if (_gpuVisual is not null)
+                _gpuVisual.Surface = presenter.Surface;
             _gpuFramePresented = true;
             _gpuPresentationError = null;
             _image.IsVisible = false;
             Interlocked.Increment(ref _renderedFrameCount);
-            LogTimelinePresentation(lease.Frame, "GPU");
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _gpuFramePresented = false;
-            _gpuPresentationError = ex.Message;
-            ConfigurePlayerVideoOutput(disableGpu: true);
+            if (IsCurrentDisplay(version, presenter))
+            {
+                _gpuFramePresented = false;
+                _gpuPresentationError = exception.Message;
+                _image.IsVisible = true;
+                Log.Write(LogLevel.Warning, nameof(FluxPlayerView),
+                    $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=GpuPresentationDisabled", exception);
+                DisposeGpuPresenter();
+            }
         }
         finally
         {
             lease.Dispose();
-            Interlocked.Exchange(ref _renderQueued, 0);
-            QueuePendingFrameIfNeeded();
+            CompleteRender(version);
         }
     }
 
     /// <summary>
-    /// 仍有待显示帧时再次安排渲染。
+    /// 判断提交是否仍属于当前画面和呈现器。
     /// </summary>
-    private void QueuePendingFrameIfNeeded()
+    private bool IsCurrentDisplay(long version, GpuVideoPresenter presenter) => !_isDetached && version == _displayVersion && ReferenceEquals(presenter, _gpuPresenter);
+
+    /// <summary>
+    /// 仅结束本代调度，不能清掉新画面的排队标记。
+    /// </summary>
+    private void CompleteRender(long version)
     {
         lock (_frameSync)
         {
-            if (_isDetached || _latestFrame is null || Interlocked.Exchange(ref _renderQueued, 1) == 1) return;
+            if (_isDetached || version != _displayVersion)
+                return;
+            _renderQueued = false;
+            if (_latestFrame is null)
+                return;
+            _renderQueued = true;
         }
-
-        // 视频链路⑦调度：切到 UI 线程处理最新帧。
-        Dispatcher.UIThread.Post(RenderLatestFrame, DispatcherPriority.Render);
+        Dispatcher.UIThread.Post(() => RenderLatestFrame(version), DispatcherPriority.Render);
     }
 
     /// <summary>
@@ -482,14 +501,14 @@ public sealed class FluxPlayerView : UserControl
     private void ConfigurePlayerVideoOutput(bool disableGpu = false)
     {
         var player = Player;
-        if (player is null) return;
+        if (player is null)
+            return;
         var presenter = disableGpu ? null : _gpuPresenter;
         player.ConfigureVideoOutput(new VideoOutputCapabilities
         {
             SupportsD3D11SharedTexture = presenter?.SupportsD3D11SharedTexture == true,
             SupportsVulkanOpaqueFileDescriptor = presenter?.SupportsVulkanOpaqueFileDescriptor == true,
-            AdapterLuid = presenter?.AdapterLuid,
-            DeviceUuid = presenter?.DeviceUuid
+            AdapterLuid = presenter?.AdapterLuid
         });
     }
 
@@ -504,8 +523,22 @@ public sealed class FluxPlayerView : UserControl
         var presenter = _gpuPresenter;
         _gpuPresenter = null;
         if (presenter is not null)
+            _ = DisposeGpuPresenterAsync(presenter, _attachedPlayer?.InstanceId ?? Guid.Empty);
+    }
+
+    /// <summary>
+    /// 异步释放错误必须被观察，且不影响其它显示资源清理。
+    /// </summary>
+    private static async Task DisposeGpuPresenterAsync(GpuVideoPresenter presenter, Guid instanceId)
+    {
+        try
         {
-            _ = presenter.DisposeAsync();
+            await presenter.DisposeAsync();
+        }
+        catch (Exception exception)
+        {
+            Log.Error(nameof(FluxPlayerView),
+                $"SessionId={instanceId} Event=GpuPresenterCleanupFailed", exception);
         }
     }
 
@@ -554,9 +587,11 @@ public sealed class FluxPlayerView : UserControl
             for (var row = 0; row < rows; row++)
             {
                 var sourceOffset = row * sourceStride;
-                if (sourceOffset >= source.Length) break;
+                if (sourceOffset >= source.Length)
+                    break;
                 var available = Math.Min(copyBytesPerRow, source.Length - sourceOffset);
-                if (available <= 0) break;
+                if (available <= 0)
+                    break;
                 var destination = destinationPointer + row * framebuffer.RowBytes;
                 Buffer.MemoryCopy(sourcePointer + sourceOffset, destination, available, available);
             }

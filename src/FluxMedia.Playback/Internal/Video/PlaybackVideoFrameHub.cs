@@ -1,4 +1,5 @@
 using FluxMedia.Core.Models;
+using System.Runtime.CompilerServices;
 using System.Threading.Channels;
 
 namespace FluxMedia.Playback.Internal;
@@ -29,13 +30,15 @@ internal sealed class PlaybackVideoFrameHub
             }
             if (_output is not null)
             {
-                while (_output.Reader.TryRead(out var previous)) previous.Dispose();
+                while (_output.Reader.TryRead(out var previous))
+                    previous.Dispose();
                 var lease = frame.Retain();
-                if (!_output.Writer.TryWrite(lease)) lease.Dispose();
+                if (!_output.Writer.TryWrite(lease))
+                    lease.Dispose();
             }
         }
-        // 视频链路③触发：回到会话 PublishVideoFrameAsync。
-        if (frame.IsCurrent) await publish(frame).ConfigureAwait(false);
+        if (frame.IsCurrent)
+            await publish(frame).ConfigureAwait(false);
     }
     /// <summary>
     /// 释放公开队列中尚未消费的帧。
@@ -44,7 +47,8 @@ internal sealed class PlaybackVideoFrameHub
     {
         lock (_sync)
             if (_output is not null)
-                while (_output.Reader.TryRead(out var lease)) lease.Dispose();
+                while (_output.Reader.TryRead(out var lease))
+                    lease.Dispose();
     }
     /// <summary>
     /// 关闭旧输出，下次读取创建新的通道。
@@ -61,8 +65,7 @@ internal sealed class PlaybackVideoFrameHub
     /// <summary>
     /// 顺序读取最新帧，跨迭代使用需保留租约。
     /// </summary>
-    public async IAsyncEnumerable<VideoFrame> ReadVideoFramesAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    public async IAsyncEnumerable<VideoFrame> ReadVideoFramesAsync([EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         Channel<VideoFrameLease> output;
         lock (_sync)

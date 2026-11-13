@@ -49,7 +49,10 @@ internal sealed unsafe class FFmpegPacketLease : IDisposable
     /// <summary>
     /// 原生读取位置切换后递增的数据包代次。
     /// </summary>
-    public long Generation { get; }
+    public long Generation
+    {
+        get;
+    }
 
     /// <summary>
     /// 克隆数据包并独立持有其引用。
@@ -69,7 +72,8 @@ internal sealed unsafe class FFmpegPacketLease : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
         var packet = _packet;
         _packet = null;
         if (packet != null)

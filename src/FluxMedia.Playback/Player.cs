@@ -1,6 +1,5 @@
-using FluxMedia.Core.Configuration;
+using LogConverge.Sharp;
 using FluxMedia.Core.Errors;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.Playback.Internal;
 
@@ -17,7 +16,7 @@ public sealed partial class Player : IAsyncDisposable
     private readonly PlaybackSession _session;
 
     /// <summary>
-    /// 串行执行播放器命令的锁。
+    /// 串行执行命令；保留至迟到调用退出后随对象回收。
     /// </summary>
     private readonly SemaphoreSlim _commandGate = new(1, 1);
 
@@ -46,7 +45,7 @@ public sealed partial class Player : IAsyncDisposable
         _session.Faulted += OnSessionFaulted;
         _session.PositionChanged += OnSessionPositionChanged;
         _session.PlaybackRateChanged += OnSessionPlaybackRateChanged;
-        // 视频链路⑤订阅：接收会话的帧事件。
+        _session.RecordingChanged += OnSessionRecordingChanged;
         _session.VideoFrameReady += OnSessionVideoFrameReady;
     }
 
@@ -349,13 +348,15 @@ public sealed partial class Player : IAsyncDisposable
     }
 
     /// <summary>
-    /// 先取消正在打开或跳转的动作，再等待命令锁执行停止。
+    /// 接受前允许取消，接受后等待播放和资源清理完成。
     /// </summary>
     public async ValueTask StopAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        cancellationToken.ThrowIfCancellationRequested();
+        // 接受停止后必须完成清理，不能在排队时取消成半停止状态。
         _session.CancelPendingOperations();
-        await ExecuteCommandAsync(_session.StopAsync, cancellationToken).ConfigureAwait(false);
+        await ExecuteCommandAsync(_session.StopAsync, CancellationToken.None).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -407,6 +408,7 @@ public sealed partial class Player : IAsyncDisposable
                 _session.Faulted -= OnSessionFaulted;
                 _session.PositionChanged -= OnSessionPositionChanged;
                 _session.PlaybackRateChanged -= OnSessionPlaybackRateChanged;
+                _session.RecordingChanged -= OnSessionRecordingChanged;
                 _session.VideoFrameReady -= OnSessionVideoFrameReady;
                 await _session.DisposeAsync().ConfigureAwait(false);
             }
@@ -419,7 +421,6 @@ public sealed partial class Player : IAsyncDisposable
         {
             FluxEngine.Unregister(this);
 
-            _commandGate.Dispose();
             NotifyPlaybackChanged();
         }
     }
@@ -428,6 +429,11 @@ public sealed partial class Player : IAsyncDisposable
     /// 转发换速请求与确认变化，不进行 UI 线程派发。
     /// </summary>
     private void OnSessionPlaybackRateChanged() => NotifyPlaybackChanged();
+
+    /// <summary>
+    /// 转发异步录制结果，让绑定层读取实际状态。
+    /// </summary>
+    private void OnSessionRecordingChanged() => NotifyPlaybackChanged();
 
     /// <summary>
     /// 转发核心状态并通知可读数据变化。
@@ -450,20 +456,17 @@ public sealed partial class Player : IAsyncDisposable
     /// <summary>
     /// 将底层视频帧通知转发给显示端。
     /// </summary>
-    // 视频链路⑤转发：触发公开帧事件，交给显示端。
     private void OnSessionVideoFrameReady(object? sender, PlaybackVideoFrameEventArgs args) => NotifySubscribers(VideoFrameReady, args, nameof(VideoFrameReady));
 
     /// <summary>
     /// 在核心触发线程转发媒体进度。
     /// </summary>
-    private void OnSessionPositionChanged(object? sender, PlaybackPositionChangedEventArgs args) =>
-        NotifySubscribers(PositionChanged, args, nameof(PositionChanged));
+    private void OnSessionPositionChanged(object? sender, PlaybackPositionChangedEventArgs args) => NotifySubscribers(PositionChanged, args, nameof(PositionChanged));
 
     /// <summary>
     /// 通知实际状态变化，释放开始时也通知观察者。
     /// </summary>
-    private void NotifyPlaybackChanged() =>
-        NotifySubscribers(PlaybackChanged, EventArgs.Empty, nameof(PlaybackChanged), allowDisposed: true);
+    private void NotifyPlaybackChanged() => NotifySubscribers(PlaybackChanged, EventArgs.Empty, nameof(PlaybackChanged), allowDisposed: true);
 
     /// <summary>
     /// 隔离每个订阅者的异常，避免影响其它显示端或通知。
@@ -480,7 +483,8 @@ public sealed partial class Player : IAsyncDisposable
             }
             catch (Exception exception)
             {
-                FluxMediaLog.Write(LogLevel.Warning, nameof(Player), InstanceId, $"Event=SubscriberFailed Notification={eventName}", exception);
+                Log.Write(LogLevel.Warning, nameof(Player),
+                    $"SessionId={InstanceId} Event=SubscriberFailed Notification={eventName}", exception);
             }
         }
     }

@@ -229,10 +229,12 @@ public sealed partial class FluxPlayerControl
     {
         if (!CanAutoHide() || !AreControlsVisible)
         {
-            if (_autoHideTimer.IsEnabled) _autoHideTimer.Stop();
+            if (_autoHideTimer.IsEnabled)
+                _autoHideTimer.Stop();
             return;
         }
-        if (_autoHideTimer.IsEnabled) return;
+        if (_autoHideTimer.IsEnabled)
+            return;
         _autoHideTimer.Interval = AutoHideDelay;
         _autoHideTimer.Start();
     }

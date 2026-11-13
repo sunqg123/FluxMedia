@@ -28,7 +28,8 @@ internal static unsafe class FFmpegMediaInfoReader
         for (var index = 0; index < formatContext->nb_streams; index++)
         {
             var stream = formatContext->streams[index];
-            if (stream == null || stream->codecpar == null) continue;
+            if (stream == null || stream->codecpar == null)
+                continue;
             var codecParameters = stream->codecpar;
             var codec = ffmpeg.avcodec_get_name(codecParameters->codec_id);
             codecs.Add(new CodecInfo(codec));

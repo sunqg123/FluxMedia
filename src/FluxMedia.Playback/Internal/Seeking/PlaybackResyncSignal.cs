@@ -22,7 +22,8 @@ internal sealed class PlaybackResyncSignal
     /// </summary>
     public void InvalidateFrames()
     {
-        lock (_sync) _request.FrameEpoch?.Invalidate();
+        lock (_sync)
+            _request.FrameEpoch?.Invalidate();
     }
 
     /// <summary>
@@ -43,6 +44,7 @@ internal sealed class PlaybackResyncSignal
     /// </summary>
     public PlaybackResyncRequest Snapshot()
     {
-        lock (_sync) return _request;
+        lock (_sync)
+            return _request;
     }
 }

@@ -34,7 +34,10 @@ internal sealed class PooledVideoFrameMemoryOwner : IVideoFrameMemoryOwner
     /// <summary>
     /// 本次租用内存的有效字节数。
     /// </summary>
-    public int Length { get; }
+    public int Length
+    {
+        get;
+    }
 
     /// <summary>
     /// 尚未归还内存池的有效缓冲区。
@@ -68,7 +71,8 @@ internal sealed class PooledVideoFrameMemoryOwner : IVideoFrameMemoryOwner
     /// </summary>
     public void Release()
     {
-        if (Interlocked.Decrement(ref _referenceCount) != 0) return;
+        if (Interlocked.Decrement(ref _referenceCount) != 0)
+            return;
         var buffer = Interlocked.Exchange(ref _buffer, null);
         if (buffer is not null)
         {

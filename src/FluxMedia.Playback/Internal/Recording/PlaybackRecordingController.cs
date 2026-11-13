@@ -3,49 +3,58 @@ using FluxMedia.FFmpeg.Pipeline;
 namespace FluxMedia.Playback.Internal;
 
 /// <summary>
-/// 管理跨管线的录制意图、转移及文件封装。
+/// 持有录制器，管理预约、管线转移和最终结果。
 /// </summary>
 internal sealed class PlaybackRecordingController
 {
     /// <summary>
-    /// 尚未连接解复用器的录制请求。
+    /// 等待播放管线的录制预约。
     /// </summary>
-    private PlaybackRecordingOptions? _pending;
-    /// <summary>
-    /// 重建期间由会话保管的录制器，重试失败时继续保留。
-    /// </summary>
-    private FFmpegPacketRemuxRecorder? _detached;
-    /// <summary>
-    /// 最近一次录制状态。
-    /// </summary>
-    private PlaybackRecordingResult _snapshot = new() { State = PlaybackRecordingState.Idle };
-    /// <summary>
-    /// 是否存在进行中或等待管线的录制请求。
-    /// </summary>
-    public bool IsRecording { get; private set; }
+    private volatile PlaybackRecordingOptions? _pending;
 
     /// <summary>
-    /// 启动录制；管线尚未建立时保留请求。
+    /// 控制器拥有的录制器，解复用器仅借用它投包。
     /// </summary>
-    public PlaybackResult Start(PlaybackRecordingOptions options, FFmpegSharedDemuxer? demuxer)
+    private volatile FFmpegPacketRemuxRecorder? _recorder;
+
+    /// <summary>
+    /// 最近一次录制或预约的结果。
+    /// </summary>
+    private volatile PlaybackRecordingResult _snapshot = new() { State = PlaybackRecordingState.Idle };
+
+    /// <summary>
+    /// 是否还有需要停止或释放的预约、录制器。
+    /// </summary>
+    public bool HasRecording => _pending is not null || _recorder is not null;
+
+    /// <summary>
+    /// 当前录制器的实际状态发生变化。
+    /// </summary>
+    public event Action? StateChanged;
+
+    /// <summary>
+    /// 失败实例先释放，再启动或预约新录制。
+    /// </summary>
+    public async ValueTask<PlaybackResult> StartAsync(PlaybackRecordingOptions options, FFmpegSharedDemuxer? demuxer)
     {
-        if (options is null) return PlaybackResult.Failure(PlaybackError.InvalidState, "录制参数不能为空。");
-        if (IsRecording) return PlaybackResult.Success();
+        if (options is null)
+            return PlaybackResult.Failure(PlaybackError.InvalidState, "录制参数不能为空。");
+        if (GetResult().State is PlaybackRecordingState.Starting or PlaybackRecordingState.Recording)
+            return PlaybackResult.Success();
         try
         {
-            var actual = options with { OutputPath = Path.GetFullPath(options.OutputPath) };
+            var actual = options with
+            {
+                OutputPath = Path.GetFullPath(options.OutputPath)
+            };
+            await ReleaseRecorderAsync(demuxer).ConfigureAwait(false);
+            _pending = actual;
             _snapshot = new PlaybackRecordingResult
             {
-                State = PlaybackRecordingState.Recording,
-                OutputPath = actual.OutputPath,
+                State = PlaybackRecordingState.Starting,
+                OutputPath = actual.OutputPath
             };
-            if (demuxer is null) _pending = actual;
-            else
-            {
-                demuxer.StartRecording(actual);
-                _snapshot = demuxer.RecordingResult ?? _snapshot;
-            }
-            IsRecording = true;
+            await AttachAsync(demuxer).ConfigureAwait(false);
             return PlaybackResult.Success();
         }
         catch (Exception exception)
@@ -60,63 +69,90 @@ internal sealed class PlaybackRecordingController
             return PlaybackResult.Failure(PlaybackError.RecordingFailed, exception.Message);
         }
     }
+
     /// <summary>
-    /// 重建前接管录制器，保证旧管线释放不会关闭录制文件。
+    /// 重建前撤回投包关联，录制器继续由控制器持有。
     /// </summary>
     public void Detach(FFmpegSharedDemuxer? demuxer)
     {
-        if (!IsRecording || demuxer is null) return;
-        if (_detached is not null) throw new InvalidOperationException("录制器尚未完成转移。");
+        if (demuxer is null)
+            return;
         demuxer.SuspendRecordingForDiscontinuity();
-        var recorder = demuxer.DetachRecording();
-        if (recorder is null) return;
-        _detached = recorder;
-        _snapshot = recorder.Result;
+        demuxer.DetachRecording();
     }
+
     /// <summary>
-    /// 新管线就绪后继续同一录制文件，或执行等待中的录制请求。
+    /// 新管线借用活动录制器，或启动已有预约。
     /// </summary>
-    public void Attach(FFmpegSharedDemuxer demuxer)
+    public async ValueTask AttachAsync(FFmpegSharedDemuxer? demuxer)
     {
-        if (!IsRecording) return;
-        if (_detached is not null)
+        if (demuxer is null)
+            return;
+        if (_recorder is { } recorder)
         {
-            demuxer.AttachRecording(_detached);
-            demuxer.ResumeRecordingAfterDiscontinuity();
-            _detached = null;
+            if (recorder.Result.State != PlaybackRecordingState.Recording)
+            {
+                await ReleaseRecorderAsync(demuxer).ConfigureAwait(false);
+                return;
+            }
+            if (demuxer.AttachRecording(recorder))
+                demuxer.ResumeRecordingAfterDiscontinuity();
         }
-        else if (_pending is not null)
+        else if (_pending is { } options)
         {
-            demuxer.StartRecording(_pending);
-            _pending = null;
+            try
+            {
+                var created = demuxer.CreateRecorder(options);
+                _recorder = created;
+                created.StateChanged += OnRecorderStateChanged;
+                created.Start();
+                demuxer.AttachRecording(created);
+                _snapshot = created.Result;
+            }
+            catch (Exception exception)
+            {
+                try
+                {
+                    await ReleaseRecorderAsync(demuxer).ConfigureAwait(false);
+                }
+                catch (Exception cleanup)
+                {
+                    exception = new AggregateException("录制启动和清理均失败。", exception, cleanup);
+                }
+                _snapshot = new PlaybackRecordingResult
+                {
+                    State = PlaybackRecordingState.Failed,
+                    OutputPath = options.OutputPath,
+                    LastError = exception.Message
+                };
+                throw new InvalidOperationException($"录制启动失败：{exception.Message}", exception);
+            }
+            finally
+            {
+                _pending = null;
+            }
         }
     }
+
     /// <summary>
-    /// 停止活动或转移中的录制器，并等待输出封装完成。
+    /// 接受停止后等待实际收尾，未启动的预约回到空闲。
     /// </summary>
     public async ValueTask<PlaybackResult> StopAsync(FFmpegSharedDemuxer? demuxer, CancellationToken cancellationToken = default)
     {
-        // 接受停止前允许取消；开始封装后以文件的最终结果为准。
         cancellationToken.ThrowIfCancellationRequested();
-        if (!IsRecording) return PlaybackResult.Success();
+        if (!HasRecording)
+            return PlaybackResult.Success();
+        if (_recorder is null)
+        {
+            _pending = null;
+            _snapshot = new PlaybackRecordingResult { State = PlaybackRecordingState.Idle };
+            return PlaybackResult.Success();
+        }
         try
         {
-            if (_detached is not null)
-            {
-                var recorder = _detached;
-                _detached = null;
-                try { await recorder.DisposeAsync().ConfigureAwait(false); }
-                finally { _snapshot = recorder.Result; }
-            }
-            else if (demuxer is not null)
-                _snapshot = await demuxer.StopRecordingAsync().ConfigureAwait(false) ?? _snapshot with
-                {
-                    State = PlaybackRecordingState.Failed,
-                    LastError = "停止录制时未找到活动录制器，无法确认最终结果。"
-                };
-            else
-                _snapshot = _snapshot with { State = PlaybackRecordingState.Completed };
-            return _snapshot.State == PlaybackRecordingState.Completed ? PlaybackResult.Success() : PlaybackResult.Failure(PlaybackError.RecordingFailed, _snapshot.LastError ?? "录制未能正常完成。");
+            await ReleaseRecorderAsync(demuxer).ConfigureAwait(false);
+            return _snapshot.State == PlaybackRecordingState.Completed ? PlaybackResult.Success()
+                : PlaybackResult.Failure(PlaybackError.RecordingFailed, _snapshot.LastError ?? "录制未能正常完成。");
         }
         catch (Exception exception)
         {
@@ -127,18 +163,51 @@ internal sealed class PlaybackRecordingController
             };
             return PlaybackResult.Failure(PlaybackError.RecordingFailed, exception.Message);
         }
-        finally { IsRecording = false; _pending = null; }
+        finally { _pending = null; }
     }
+
     /// <summary>
-    /// 返回当前活动录制器或最近一次封装状态。
+    /// 解除投包关联，等写入线程结束后归还录制器。
     /// </summary>
-    public PlaybackRecordingResult GetResult(FFmpegSharedDemuxer? demuxer) => IsRecording ? _detached?.Result ?? demuxer?.RecordingResult ?? _snapshot : _snapshot;
+    private async ValueTask ReleaseRecorderAsync(FFmpegSharedDemuxer? demuxer)
+    {
+        var recorder = _recorder;
+        if (recorder is null)
+            return;
+        recorder.StateChanged -= OnRecorderStateChanged;
+        demuxer?.DetachRecording();
+        try
+        {
+            await recorder.DisposeAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _snapshot = recorder.Result;
+            _recorder = null;
+        }
+    }
+
     /// <summary>
-    /// 打开新媒体前清除已结束录制的结果。
+    /// 只转发当前实例的通知，旧录制器不能刷新新录制。
+    /// </summary>
+    private void OnRecorderStateChanged(FFmpegPacketRemuxRecorder recorder)
+    {
+        if (ReferenceEquals(recorder, _recorder))
+            StateChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// 读取实际状态，不依赖诊断或文件属性。
+    /// </summary>
+    public PlaybackRecordingResult GetResult() => _recorder?.Result ?? _snapshot;
+
+    /// <summary>
+    /// 新媒体清除已结束的录制结果。
     /// </summary>
     public void Reset()
     {
-        if (IsRecording) throw new InvalidOperationException("应先停止旧媒体的录制。");
+        if (HasRecording)
+            throw new InvalidOperationException("应先停止旧媒体的录制。");
         _snapshot = new PlaybackRecordingResult { State = PlaybackRecordingState.Idle };
     }
 }

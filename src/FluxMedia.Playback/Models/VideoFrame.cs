@@ -80,7 +80,10 @@ public sealed class VideoFrame : IDisposable
     /// <summary>
     /// 格式。
     /// </summary>
-    public VideoFormat Format { get; }
+    public VideoFormat Format
+    {
+        get;
+    }
 
     /// <summary>
     /// 帧像素数据；有效期受帧和租约控制。
@@ -90,7 +93,10 @@ public sealed class VideoFrame : IDisposable
     /// <summary>
     /// 供显示端导入的 GPU 表面。
     /// </summary>
-    public GpuVideoSurface? GpuSurface { get; }
+    public GpuVideoSurface? GpuSurface
+    {
+        get;
+    }
 
     /// <summary>
     /// 是否使用 GPU 帧。
@@ -100,12 +106,18 @@ public sealed class VideoFrame : IDisposable
     /// <summary>
     /// 时间戳。
     /// </summary>
-    public TimeSpan Timestamp { get; }
+    public TimeSpan Timestamp
+    {
+        get;
+    }
 
     /// <summary>
     /// 序号。
     /// </summary>
-    public long Sequence { get; }
+    public long Sequence
+    {
+        get;
+    }
 
     /// <summary>
     /// 跳转或退役后旧帧失效，异步显示前应再次检查。
@@ -134,7 +146,10 @@ public sealed class VideoFrame : IDisposable
     /// <summary>
     /// 每行像素占用的字节数。
     /// </summary>
-    public int Stride { get; }
+    public int Stride
+    {
+        get;
+    }
 
     /// <summary>
     /// 增加帧引用，供异步处理或跨回调持有。
@@ -161,7 +176,8 @@ public sealed class VideoFrame : IDisposable
     {
         lock (_lifetimeSync)
         {
-            if (_disposed) return;
+            if (_disposed)
+                return;
             _disposed = true;
             _owner?.Release();
         }
@@ -174,7 +190,8 @@ public sealed class VideoFrame : IDisposable
     {
         lock (_lifetimeSync)
         {
-            if (_activeLeaseCount <= 0) return;
+            if (_activeLeaseCount <= 0)
+                return;
             _activeLeaseCount--;
             _owner?.Release();
         }

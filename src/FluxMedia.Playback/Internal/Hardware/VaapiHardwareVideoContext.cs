@@ -1,6 +1,5 @@
+using LogConverge.Sharp;
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.FFmpeg.Native;
 using System.Runtime.InteropServices;
 
@@ -73,7 +72,7 @@ internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
             {
                 throw new InvalidOperationException($"FFmpeg VAAPI device creation failed: {FFmpegErrorHelper.GetErrorMessage(result)}");
             }
-            FluxMediaLog.Write(LogLevel.Information, nameof(VaapiHardwareVideoContext), instanceId, $"Event=HardwareVideoDeviceCreated Backend=VAAPI PixelFormat={hardwarePixelFormat}");
+
             return true;
         }
         catch (Exception ex)
@@ -81,8 +80,8 @@ internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
             error = ex.Message;
             context?.Dispose();
             context = null;
-            FluxMediaLog.Write(
-                LogLevel.Warning, nameof(VaapiHardwareVideoContext), instanceId, $"Event=HardwareVideoDeviceCreateFailed Backend=VAAPI Error={ex.Message}", ex);
+            Log.Write(LogLevel.Warning, nameof(VaapiHardwareVideoContext),
+                $"SessionId={instanceId} Event=HardwareVideoDeviceCreateFailed Backend=VAAPI Error={ex.Message}", ex);
             return false;
         }
     }
@@ -125,8 +124,7 @@ internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
     /// <summary>
     /// 从候选格式中选择硬件像素格式。
     /// </summary>
-    private AVPixelFormat SelectHardwarePixelFormat(AVCodecContext* _, AVPixelFormat* formats)
-        => HardwarePixelFormats.Select(formats, _hardwarePixelFormat);
+    private AVPixelFormat SelectHardwarePixelFormat(AVCodecContext* _, AVPixelFormat* formats) => HardwarePixelFormats.Select(formats, _hardwarePixelFormat);
 
     /// <summary>
     /// 对象已释放时阻止继续操作。

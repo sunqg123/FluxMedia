@@ -11,7 +11,9 @@ internal static class AudioTempoPlan
     public static int GetRequiredStageCount(double rate)
     {
         if (!PlaybackRatePolicy.IsSupported(rate))
+        {
             throw new ArgumentOutOfRangeException(nameof(rate), rate, "播放速度必须是大于 0 的有限值。");
+        }
         var count = 0;
         var remaining = rate;
         while (remaining != 1.0)
@@ -28,12 +30,14 @@ internal static class AudioTempoPlan
     public static bool TryPlan(double rate, int budget, out double[] stages)
     {
         stages = Array.Empty<double>();
-        if (!PlaybackRatePolicy.IsSupported(rate) || budget < 0 || budget > PlaybackRatePolicy.MaxSupportedAudioTempoStages) return false;
+        if (!PlaybackRatePolicy.IsSupported(rate) || budget < 0 || budget > PlaybackRatePolicy.MaxSupportedAudioTempoStages)
+            return false;
         var plan = new List<double>(Math.Min(budget, 8));
         var remaining = rate;
         while (remaining != 1.0)
         {
-            if (plan.Count >= budget) return false;
+            if (plan.Count >= budget)
+                return false;
             var stage = GetStageRate(remaining);
             plan.Add(stage);
             remaining /= stage;

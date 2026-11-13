@@ -24,30 +24,48 @@ internal sealed class VideoPlaybackWorkerCallbacks
     /// <summary>
     /// 接收解码后的有效视频帧。
     /// </summary>
-    public Action<VideoFrame> FrameReady { get; }
+    public Action<VideoFrame> FrameReady
+    {
+        get;
+    }
 
     /// <summary>
     /// 读取最新音频时钟信息。
     /// </summary>
-    public Func<AudioClockSnapshot?> AudioClock { get; }
+    public Func<AudioClockSnapshot?> AudioClock
+    {
+        get;
+    }
 
     /// <summary>
     /// 读取当前视频缓冲时长。
     /// </summary>
-    public Func<TimeSpan> BufferedDuration { get; }
+    public Func<TimeSpan> BufferedDuration
+    {
+        get;
+    }
 
     /// <summary>
     /// 读取当前视频缓冲包数。
     /// </summary>
-    public Func<int> BufferedPacketCount { get; }
+    public Func<int> BufferedPacketCount
+    {
+        get;
+    }
 
     /// <summary>
     /// 读取显示端输出能力。
     /// </summary>
-    public Func<VideoOutputCapabilities> VideoCapabilities { get; }
+    public Func<VideoOutputCapabilities> VideoCapabilities
+    {
+        get;
+    }
 
     /// <summary>
     /// 通知已消费的录制数据包。
     /// </summary>
-    public FFmpegPacketConsumer? PacketConsumed { get; }
+    public FFmpegPacketConsumer? PacketConsumed
+    {
+        get;
+    }
 }

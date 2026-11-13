@@ -1,6 +1,5 @@
-using FluxMedia.Core.Configuration;
+using LogConverge.Sharp;
 using FluxMedia.Core.Errors;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.Core.State;
 using FluxMedia.FFmpeg.Pipeline;
@@ -13,7 +12,6 @@ namespace FluxMedia.Playback;
 /// </summary>
 internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackState>
 {
-
     /// <summary>
     /// 跳转首帧等待上限。
     /// </summary>
@@ -67,8 +65,12 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         get
         {
             var source = _operationCts;
-            if (source is null) return new CancellationToken(true);
-            try { return source.Token; }
+            if (source is null)
+                return new CancellationToken(true);
+            try
+            {
+                return source.Token;
+            }
             catch (ObjectDisposedException) { return new CancellationToken(true); }
         }
     }
@@ -194,12 +196,18 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// <summary>
     /// 当前已打开的本地文件或网络媒体源。
     /// </summary>
-    public MediaSource? CurrentSource { get; private set; }
+    public MediaSource? CurrentSource
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 当前媒体的容器和音视频流信息。
     /// </summary>
-    public MediaInfo? CurrentMediaInfo { get; private set; }
+    public MediaInfo? CurrentMediaInfo
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 当前处理到的媒体时间。
@@ -280,7 +288,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         ThrowIfDisposed();
         if (!MediaSourcePolicy.TryValidate(request?.Source, out var source, out var validationError))
         {
-            var error = CreateError(PlaybackError.OpenFailed, validationError) with { MediaSource = request?.Source?.Uri };
+            var error = CreateError(PlaybackError.OpenFailed, validationError) with
+            {
+                MediaSource = request?.Source?.Uri
+            };
             NotifyFault(error);
             throw new PlaybackException(PlaybackError.OpenFailed, error);
         }
@@ -295,7 +306,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             var stopResult = await StopCoreAsync(CancellationToken.None).ConfigureAwait(false);
             ThrowIfRecordingStopFailed(stopResult);
             ResetOperationLifetime();
-            if (cancelVersion != Volatile.Read(ref _cancelVersion)) _operationCts!.Cancel();
+            if (cancelVersion != Volatile.Read(ref _cancelVersion))
+                _operationCts!.Cancel();
             await TransitionAsync(PlaybackState.Opening, cancellationToken).ConfigureAwait(false);
             CurrentSource = source;
             CurrentMediaInfo = null;
@@ -318,9 +330,12 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 var pipeline = CreatePipeline(TimeSpan.Zero);
                 await pipeline.PrepareAsync(open.Token).ConfigureAwait(false);
                 CurrentMediaInfo = pipeline.Demuxer.MediaInfo ?? throw new InvalidOperationException("未读取到媒体信息。");
-                if (!CurrentMediaInfo.HasVideo) throw new InvalidOperationException("当前媒体没有视频流。");
+                if (!CurrentMediaInfo.HasVideo)
+                    throw new InvalidOperationException("当前媒体没有视频流。");
                 ConfigureInitialRate();
                 await TransitionAsync(PlaybackState.Ready, cancellationToken).ConfigureAwait(false);
+                Log.Info(ComponentName,
+                    $"SessionId={InstanceId} Event=MediaOpened SourceKind={source.Kind} IsLive={IsLive} Duration={Duration}");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _operationCts?.IsCancellationRequested != false)
             {
@@ -350,7 +365,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (cancelVersion != Volatile.Read(ref _cancelVersion)) throw new OperationCanceledException();
+            if (cancelVersion != Volatile.Read(ref _cancelVersion))
+                throw new OperationCanceledException();
             return await PlayCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally { _pipelineMutationGate.Release(); }
@@ -363,9 +379,12 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     {
         EnsureOpened();
         cancellationToken.ThrowIfCancellationRequested();
-        if (State == PlaybackState.Failed) return ControlFailure(PlaybackError.InvalidState, "播放已失败，请重新打开媒体。");
-        if (State == PlaybackState.Playing && _pipeline is { IsCanceled: false, Completion.IsCompleted: false }) return PlaybackResult.Success();
-        if (_operationCts is null || _operationCts.IsCancellationRequested) ResetOperationLifetime();
+        if (State == PlaybackState.Failed)
+            return ControlFailure(PlaybackError.InvalidState, "播放已失败，请重新打开媒体。");
+        if (State == PlaybackState.Playing && _pipeline is { IsCanceled: false, Completion.IsCompleted: false })
+            return PlaybackResult.Success();
+        if (_operationCts is null || _operationCts.IsCancellationRequested)
+            ResetOperationLifetime();
         _isPaused = false;
         _rates.Wake();
         _pauseAfterSeekFrame = false;
@@ -376,11 +395,12 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         }
         else if (_pipeline.Completion is null)
         {
-            _recording.Attach(_pipeline.Demuxer);
+            await _recording.AttachAsync(_pipeline.Demuxer).ConfigureAwait(false);
             await TransitionAsync(PlaybackState.Playing, cancellationToken).ConfigureAwait(false);
             StartPipeline(_pipeline);
         }
-        else await TransitionAsync(PlaybackState.Playing, cancellationToken).ConfigureAwait(false);
+        else
+            await TransitionAsync(PlaybackState.Playing, cancellationToken).ConfigureAwait(false);
         return PlaybackResult.Success();
     }
 
@@ -397,8 +417,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                if (cancelVersion != Volatile.Read(ref _cancelVersion)) throw new OperationCanceledException();
-                if (State == PlaybackState.Failed) return ControlFailure(PlaybackError.InvalidState, "播放已失败。");
+                if (cancelVersion != Volatile.Read(ref _cancelVersion))
+                    throw new OperationCanceledException();
+                if (State == PlaybackState.Failed)
+                    return ControlFailure(PlaybackError.InvalidState, "播放已失败。");
                 return await PauseCoreAsync(cancellationToken).ConfigureAwait(false);
             }
             finally { _pipelineMutationGate.Release(); }
@@ -440,8 +462,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         cancellationToken.ThrowIfCancellationRequested();
         if (!CanSeek)
         {
-            FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId,
-                $"Event=SeekRejected IsLive={IsLive} Duration={Duration} State={State} Requested={position}");
             return PlaybackResult.Failure(PlaybackError.NotSeekable, IsLive ? "直播流不允许调整播放进度。" : "当前媒体尚不支持时间跳转。");
         }
 
@@ -464,8 +484,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         cancellationToken.ThrowIfCancellationRequested();
         if (!CanSeek)
         {
-            FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId,
-                $"Event=SeekExecutionRejected IsLive={IsLive} Duration={Duration} State={State} Requested={target}");
             return PlaybackResult.Failure(PlaybackError.NotSeekable, "当前媒体不允许调整播放进度。");
         }
         var startedAt = DateTimeOffset.UtcNow;
@@ -474,7 +492,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _activeSeek = new PlaybackSeekFrame(_seeking.Operation.RequestId, target, startedAt);
         _seeking.Begin();
         await TransitionAsync(PlaybackState.Seeking, cancellationToken).ConfigureAwait(false);
-        var recordingSuspended = _recording.IsRecording && Demuxer is not null;
+        var recordingSuspended = _recording.HasRecording && Demuxer is not null;
         if (recordingSuspended)
         {
             Demuxer!.SuspendRecordingForDiscontinuity();
@@ -572,7 +590,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         {
             await TransitionAsync(resumePlaying ? PlaybackState.Playing : PlaybackState.Paused, CancellationToken.None).ConfigureAwait(false);
         }
-
     }
 
     /// <summary>
@@ -661,10 +678,13 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (CurrentMediaInfo?.HasVideo != true) return ControlFailure(PlaybackError.RecordingFailed, "当前媒体没有视频流。");
+            if (CurrentMediaInfo?.HasVideo != true)
+                return ControlFailure(PlaybackError.RecordingFailed, "当前媒体没有视频流。");
             if (State is PlaybackState.Created or PlaybackState.Opening or PlaybackState.Failed or PlaybackState.Stopping or PlaybackState.Disposed)
                 return ControlFailure(PlaybackError.InvalidState, "当前状态无法开始录制。");
-            var result = _recording.Start(options, Demuxer);
+            var result = await _recording.StartAsync(options, Demuxer).ConfigureAwait(false);
+            if (!result.IsSuccess)
+                Log.Error(ComponentName, $"SessionId={InstanceId} Event=RecordingStartFailed Message={result.Message}");
             return result;
         }
         finally { _pipelineMutationGate.Release(); }
@@ -676,14 +696,26 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     public async ValueTask<PlaybackResult> StopRecordingAsync(CancellationToken cancellationToken = default)
     {
         await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try { return await StopRecordingCoreAsync(cancellationToken).ConfigureAwait(false); }
+        try
+        {
+            return await StopRecordingCoreAsync(cancellationToken).ConfigureAwait(false);
+        }
         finally { _pipelineMutationGate.Release(); }
+    }
+
+    /// <summary>
+    /// 录制业务状态通知，不依赖播放进度或诊断查询。
+    /// </summary>
+    public event Action? RecordingChanged
+    {
+        add => _recording.StateChanged += value;
+        remove => _recording.StateChanged -= value;
     }
 
     /// <summary>
     /// 读取实际录制状态，不访问输出文件。
     /// </summary>
-    public PlaybackRecordingState RecordingState => _recording.GetResult(Demuxer).State;
+    public PlaybackRecordingState RecordingState => _recording.GetResult().State;
 
     /// <summary>
     /// 获取已打开媒体的基本信息。
@@ -711,10 +743,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     {
         cancellationToken.ThrowIfCancellationRequested();
         CancelPendingOperations();
-        await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await _pipelineMutationGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            return await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+            return await StopCoreAsync(CancellationToken.None).ConfigureAwait(false);
         }
         finally
         {
@@ -728,7 +760,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     public void CancelPendingOperations()
     {
         Interlocked.Increment(ref _cancelVersion);
-        try { _operationCts?.Cancel(); }
+        try
+        {
+            _operationCts?.Cancel();
+        }
         catch (ObjectDisposedException) { }
         _seeking.CancelPending(new OperationCanceledException("播放操作已取消。"));
         _rates.Retire(preservePending: false);
@@ -740,7 +775,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     private async ValueTask<PlaybackResult> StopCoreAsync(CancellationToken cancellationToken)
     {
         _rates.Retire(preservePending: false);
-        if (IsDisposed || State == PlaybackState.Disposed) return PlaybackResult.Success();
+        if (IsDisposed || State == PlaybackState.Disposed)
+            return PlaybackResult.Success();
         if (State is PlaybackState.Created or PlaybackState.Stopped)
         {
             var result = await StopRecordingCoreAsync(CancellationToken.None).ConfigureAwait(false);
@@ -758,7 +794,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _isPaused = false;
         _pauseAfterSeekFrame = false;
         var cleanupFailure = await RetirePipelineAsync().ConfigureAwait(false);
-        try { _videoFrames.ResetPublicOutput(); }
+        try
+        {
+            _videoFrames.ResetPublicOutput();
+        }
         catch (Exception exception)
         {
             cleanupFailure = cleanupFailure is null ? exception : new AggregateException("管线和视频输出清理均失败。", cleanupFailure, exception);
@@ -802,18 +841,34 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     protected override async ValueTask DisposeCoreAsync()
     {
         var errors = new List<Exception>();
-        try { await StopPlaybackAsync(CancellationToken.None).ConfigureAwait(false); }
+        try
+        {
+            await StopPlaybackAsync(CancellationToken.None).ConfigureAwait(false);
+        }
         catch (Exception exception) { errors.Add(exception); }
-        try { await _seeking.DisposeAsync().ConfigureAwait(false); }
+        try
+        {
+            await _seeking.DisposeAsync().ConfigureAwait(false);
+        }
         catch (Exception exception) { errors.Add(exception); }
-        try { _operationCts?.Dispose(); }
+        try
+        {
+            _operationCts?.Dispose();
+        }
         catch (Exception exception) { errors.Add(exception); }
-        try { _videoFrames.ResetPublicOutput(); }
+        try
+        {
+            _videoFrames.ResetPublicOutput();
+        }
         catch (Exception exception) { errors.Add(exception); }
-        try { await TransitionAsync(PlaybackState.Disposed).ConfigureAwait(false); }
+        try
+        {
+            await TransitionAsync(PlaybackState.Disposed).ConfigureAwait(false);
+        }
         catch (Exception exception) { errors.Add(exception); }
-        FluxMediaLog.Flush();
-        if (errors.Count > 0) throw new AggregateException("播放会话资源释放失败。", errors);
+
+        if (errors.Count > 0)
+            throw new AggregateException("播放会话资源释放失败。", errors);
     }
 
     /// <summary>
@@ -821,7 +876,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// </summary>
     private ValueTask PublishVideoFrameAsync(VideoFrame frame)
     {
-        if (!frame.IsCurrent) return default;
+        if (!frame.IsCurrent)
+            return default;
         var seek = _activeSeek;
         _currentTime = frame.Timestamp;
         var now = DateTimeOffset.UtcNow;
@@ -829,7 +885,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         {
             InvokeSubscribersSafely(PositionChanged, new PlaybackPositionChangedEventArgs(_currentTime, Duration), nameof(PositionChanged));
         }
-        // 视频链路④触发：会话帧事件通知 Player。
         InvokeSubscribersSafely(VideoFrameReady, new PlaybackVideoFrameEventArgs(frame), nameof(VideoFrameReady));
         seek?.TryAccept(frame);
 
@@ -858,7 +913,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         }
         cancellationToken.ThrowIfCancellationRequested();
         var synchronization = _resyncSignal.Request(startPosition);
-        if (synchronization.FrameEpoch is { } epoch) _activeSeek?.BindEpoch(epoch);
+        if (synchronization.FrameEpoch is { } epoch)
+            _activeSeek?.BindEpoch(epoch);
         _workerStartPosition = startPosition;
         _currentTime = startPosition;
         _isPaused = false;
@@ -867,7 +923,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         {
             var pipeline = CreatePipeline(startPosition);
             await pipeline.PrepareAsync(cancellationToken).ConfigureAwait(false);
-            _recording.Attach(pipeline.Demuxer);
+            await _recording.AttachAsync(pipeline.Demuxer).ConfigureAwait(false);
             if (State is PlaybackState.Ready or PlaybackState.Stopped or PlaybackState.Completed)
                 await TransitionAsync(resumePlaying ? PlaybackState.Playing : PlaybackState.Paused, cancellationToken).ConfigureAwait(false);
             StartPipeline(pipeline);
@@ -882,7 +938,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 await TransitionAsync(PlaybackState.Stopping).ConfigureAwait(false);
                 await TransitionAsync(PlaybackState.Stopped).ConfigureAwait(false);
             }
-            if (cleanup is not null) throw new AggregateException("管线重建失败，清理也发生错误。", exception, cleanup);
+            if (cleanup is not null)
+                throw new AggregateException("管线重建失败，清理也发生错误。", exception, cleanup);
             throw;
         }
     }
@@ -894,10 +951,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     {
         var demuxer = Demuxer;
         if (demuxer is null || _pipeline?.IsCanceled != false)
-        {
             return false;
-        }
-
         try
         {
             _isPaused = true;
@@ -914,9 +968,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         {
             throw;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=SeekDemuxerFailed Target={target} Error={ex.Message}", ex);
             return false;
         }
     }
@@ -930,7 +983,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         _videoFrames.ClearPublicOutput();
         var request = _resyncSignal.Request(position);
         _rates.Resync(request.Version);
-        if (request.FrameEpoch is { } epoch) _activeSeek?.BindEpoch(epoch);
+        if (request.FrameEpoch is { } epoch)
+            _activeSeek?.BindEpoch(epoch);
         _workerStartPosition = position;
         _currentTime = position;
         _isPaused = false;
@@ -970,7 +1024,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     {
         var seek = _activeSeek;
         var firstFrame = seek?.FirstFrame;
-        if (firstFrame is null) return false;
+        if (firstFrame is null)
+            return false;
         using var wait = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var deadline = Task.Delay(timeout, wait.Token);
         var completed = await Task.WhenAny(firstFrame, deadline).ConfigureAwait(false);
@@ -991,9 +1046,13 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     private async Task TryRecoverNetworkPlaybackAsync(PlaybackPipeline failedPipeline, string reason)
     {
         var operation = _operationCts;
-        if (operation is null || operation.IsCancellationRequested) return;
+        if (operation is null || operation.IsCancellationRequested)
+            return;
         CancellationToken operationToken;
-        try { operationToken = operation.Token; }
+        try
+        {
+            operationToken = operation.Token;
+        }
         catch (ObjectDisposedException) { return; }
         var gateEntered = false;
         try
@@ -1012,17 +1071,20 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 attempt++;
                 var resumePlaying = State != PlaybackState.Paused && !_isPaused;
                 var startPosition = CanSeekCurrentSource() ? _currentTime : TimeSpan.Zero;
-                FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=NetworkRecoveryStart Attempt={attempt} Reason={reason} ResumePlaying={resumePlaying} Start={startPosition}");
+                Log.Warning(ComponentName,
+                    $"SessionId={InstanceId} Event=NetworkRecoveryStart Attempt={attempt} Reason={reason} ResumePlaying={resumePlaying} Start={startPosition}");
                 try
                 {
                     await RestartPlaybackWorkerCoreAsync(startPosition, resumePlaying, operationToken).ConfigureAwait(false);
+                    Log.Info(ComponentName, $"SessionId={InstanceId} Event=NetworkRecovered Attempt={attempt}");
                     return;
                 }
                 catch (OperationCanceledException) when (operationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     reason = ex.Message;
-                    FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=NetworkRecoveryAttemptFailed Attempt={attempt}", ex);
+                    Log.Write(LogLevel.Warning, ComponentName,
+                        $"SessionId={InstanceId} Event=NetworkRecoveryAttemptFailed Attempt={attempt}", ex);
                     if (attempt < maxAttempts)
                         await Task.Delay(_currentOptions.Network.ReconnectDelay, operationToken).ConfigureAwait(false);
                 }
@@ -1035,7 +1097,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             _rates.Retire(preservePending: false);
             await TransitionAsync(PlaybackState.Failed, operationToken).ConfigureAwait(false);
             Exception failure = new IOException(reason);
-            if (cleanup is not null) failure = new AggregateException("网络恢复失败，管线清理也发生错误。", failure, cleanup);
+            if (cleanup is not null)
+                failure = new AggregateException("网络恢复失败，管线清理也发生错误。", failure, cleanup);
             NotifyFault(CreateError(PlaybackError.PlayFailed, "网络播放恢复失败，已达到重试上限或关闭了重连。"), failure);
         }
         catch (OperationCanceledException) when (operationToken.IsCancellationRequested)
@@ -1043,7 +1106,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         }
         catch (Exception ex)
         {
-            FluxMediaLog.Write(LogLevel.Error, ComponentName, InstanceId, "Event=NetworkRecoveryFailed", ex);
             if (gateEntered && !IsDisposed && !operationToken.IsCancellationRequested)
             {
                 _rates.Retire(preservePending: false);
@@ -1053,7 +1115,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         }
         finally
         {
-            if (gateEntered) _pipelineMutationGate.Release();
+            if (gateEntered)
+                _pipelineMutationGate.Release();
         }
     }
 
@@ -1115,11 +1178,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     }
 
     /// <summary>
-    /// 记录控制失败并返回失败结果。
+    /// 返回控制失败结果，由调用方决定如何提示。
     /// </summary>
-    private PlaybackResult ControlFailure(PlaybackError error, string message)
+    private static PlaybackResult ControlFailure(PlaybackError error, string message)
     {
-        FluxMediaLog.Write(LogLevel.Warning, ComponentName, InstanceId, $"Event=PlaybackControlFailed Error={error} Message={message} State={State} SourceKind={CurrentSource?.Kind} Source={CurrentSource?.Uri}");
         return PlaybackResult.Failure(error, message);
     }
 
@@ -1148,7 +1210,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         PlaybackPipeline? pipeline = null;
         var callbacks = new PlaybackPipelineCallbacks(() => _isPaused, () => PlaybackRate, () => _volume, () => _isMuted,
             _resyncSignal.Snapshot, () => Volatile.Read(ref _videoOutputCapabilities),
-            // 视频链路④绑定：只让当前管线发布到会话。
             frame => ReferenceEquals(_pipeline, pipeline) ? PublishVideoFrameAsync(frame) : default);
         pipeline = new PlaybackPipeline(CurrentSource!, _currentOptions, InstanceId, position, _videoFrames, callbacks, _operationCts!.Token, _rates);
         _pipeline = pipeline;
@@ -1169,16 +1230,24 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     {
         var pipeline = _pipeline;
         _pipeline = null;
-        if (pipeline is null) return null;
+        if (pipeline is null)
+            return null;
         _rates.Retire(preservePending: true);
         var errors = new List<Exception>();
-        try { await pipeline.DisposeAsync().ConfigureAwait(false); }
+        try
+        {
+            await pipeline.DisposeAsync().ConfigureAwait(false);
+        }
         catch (Exception exception) { errors.Add(exception); }
-        try { _videoFrames.ClearPublicOutput(); }
+        try
+        {
+            _videoFrames.ClearPublicOutput();
+        }
         catch (Exception exception) { errors.Add(exception); }
-        if (errors.Count == 0) return null;
+        if (errors.Count == 0)
+            return null;
         var failure = new AggregateException("播放管线退役时发生资源清理错误。", errors);
-        FluxMediaLog.Write(LogLevel.Error, ComponentName, InstanceId, "Event=PipelineRetirementFailed", failure);
+
         return failure;
     }
 
@@ -1194,8 +1263,10 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             await completion.ConfigureAwait(false);
         }
         catch (Exception exception) { failure = exception; }
-        if (!ReferenceEquals(_pipeline, pipeline) || _operationCts?.IsCancellationRequested != false || IsDisposed) return;
-        if (failure is OperationCanceledException && pipeline.IsCanceled) return;
+        if (!ReferenceEquals(_pipeline, pipeline) || _operationCts?.IsCancellationRequested != false || IsDisposed)
+            return;
+        if (failure is OperationCanceledException && pipeline.IsCanceled)
+            return;
         if (failure is not null && !pipeline.HasControlFailure && CurrentSource?.Kind == MediaSourceKind.NetworkStream && pipeline.Demuxer.HasFailed)
         {
             await TryRecoverNetworkPlaybackAsync(pipeline, failure.Message).ConfigureAwait(false);
@@ -1204,7 +1275,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         await _pipelineMutationGate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (!ReferenceEquals(_pipeline, pipeline) || _operationCts?.IsCancellationRequested != false || IsDisposed) return;
+            if (!ReferenceEquals(_pipeline, pipeline) || _operationCts?.IsCancellationRequested != false || IsDisposed)
+                return;
             await StopRecordingCoreAsync(CancellationToken.None).ConfigureAwait(false);
             if (failure is null)
             {
@@ -1213,7 +1285,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
             else
             {
                 var cleanup = await RetirePipelineAsync().ConfigureAwait(false);
-                if (cleanup is not null) failure = new AggregateException("播放失败，管线清理也发生错误。", failure, cleanup);
+                if (cleanup is not null)
+                    failure = new AggregateException("播放失败，管线清理也发生错误。", failure, cleanup);
                 if (State != PlaybackState.Failed)
                 {
                     _rates.Retire(preservePending: false);
@@ -1240,10 +1313,19 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
         {
             await WaitForRateBarrierAsync(completion, cancellationToken).ConfigureAwait(false);
             await _pipelineMutationGate.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try { return await ExecuteSeekAsync(target, resumePlaying, cancellationToken).ConfigureAwait(false); }
-            finally { _pipelineMutationGate.Release(); }
+            try
+            {
+                return await ExecuteSeekAsync(target, resumePlaying, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _pipelineMutationGate.Release();
+            }
         }
-        finally { _rates.Resume(); }
+        finally
+        {
+            _rates.Resume();
+        }
     }
 
     /// <summary>
@@ -1255,7 +1337,8 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// </summary>
     private async ValueTask<PlaybackResult> StopRecordingCoreAsync(CancellationToken cancellationToken)
     {
-        if (!_recording.IsRecording) return PlaybackResult.Success();
+        if (!_recording.HasRecording)
+            return PlaybackResult.Success();
         var result = await _recording.StopAsync(Demuxer, cancellationToken).ConfigureAwait(false);
         if (!result.IsSuccess)
         {

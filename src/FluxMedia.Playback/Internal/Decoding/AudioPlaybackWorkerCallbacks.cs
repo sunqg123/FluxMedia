@@ -20,15 +20,24 @@ internal sealed class AudioPlaybackWorkerCallbacks
     /// <summary>
     /// 读取当前音量。
     /// </summary>
-    public Func<double> Volume { get; }
+    public Func<double> Volume
+    {
+        get;
+    }
 
     /// <summary>
     /// 读取当前静音状态。
     /// </summary>
-    public Func<bool> IsMuted { get; }
+    public Func<bool> IsMuted
+    {
+        get;
+    }
 
     /// <summary>
     /// 通知已消费的录制数据包。
     /// </summary>
-    public FFmpegPacketConsumer? PacketConsumed { get; }
+    public FFmpegPacketConsumer? PacketConsumed
+    {
+        get;
+    }
 }

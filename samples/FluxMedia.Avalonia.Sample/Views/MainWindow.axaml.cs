@@ -1,3 +1,4 @@
+using LogConverge.Sharp;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -5,9 +6,7 @@ using Avalonia.Input;
 using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FluxMedia.Avalonia.Sample.ViewModels;
-using FluxMedia.Core.Logging;
 using FluxMedia.Playback;
-using System.Diagnostics;
 
 namespace FluxMedia.Avalonia.Sample.Views;
 
@@ -64,12 +63,8 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            FluxMediaLog.Error(
-                nameof(MainWindow),
-                "Event=PlayerRemovalFailed",
-                exception,
-                player.InstanceId);
-            Trace.TraceError("Event=PlayerRemovalFailed SessionId={0} Exception={1}", player.InstanceId, exception);
+            Log.Error(nameof(MainWindow),
+                $"SessionId={player.InstanceId} Event=PlayerRemovalFailed", exception);
         }
     }
 
@@ -178,8 +173,8 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception exception)
         {
-            FluxMediaLog.Error(nameof(MainWindow), "Event=WindowCleanupFailed", exception);
-            Trace.TraceError("Event=WindowCleanupFailed Exception={0}", exception);
+            Log.Error(nameof(MainWindow),
+                "Event=WindowCleanupFailed", exception);
         }
         finally
         {

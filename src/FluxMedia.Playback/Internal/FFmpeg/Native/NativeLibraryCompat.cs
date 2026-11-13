@@ -36,7 +36,8 @@ internal static class NativeLibraryCompat
         path = Path.GetFullPath(path);
         lock (SyncRoot)
         {
-            if (Handles.ContainsKey(path)) return;
+            if (Handles.ContainsKey(path))
+                return;
             IntPtr handle;
             if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
             {

@@ -1,6 +1,5 @@
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 using FluxMedia.FFmpeg.Extensions;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.FFmpeg.Pipeline;
@@ -114,10 +113,13 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     /// </summary>
     private bool SetOutputPaused(bool paused, ref bool wasPaused)
     {
-        if (paused == wasPaused) return false;
+        if (paused == wasPaused)
+            return false;
         wasPaused = paused;
-        if (paused) _output.Pause();
-        else _output.Play();
+        if (paused)
+            _output.Pause();
+        else
+            _output.Play();
         return true;
     }
 
@@ -155,7 +157,8 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             tempo = new FFmpegAudioTempo(codecContext, sampleRate, outputChannels, _context.PlaybackRate(), _stageBudget);
 
             cancellationToken.ThrowIfCancellationRequested();
-            if (_disposed) throw new OperationCanceledException();
+            if (_disposed)
+                throw new OperationCanceledException();
             _output.Initialize(sampleRate, outputChannels);
             _output.SetVolume(_callbacks.Volume(), _callbacks.IsMuted());
             _output.Play();
@@ -173,22 +176,24 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             var initialPosition = initialResync.Version > 0 ? initialResync.Position : _context.StartPosition;
             var nextFrameTime = initialPosition;
             TimeSpan? prerollDropUntil = initialPosition > TimeSpan.Zero ? initialPosition : null;
-            // 音频链路②接收：接收滤镜输出的 PCM。
             void WritePcm(ReadOnlySpan<byte> pcm, int samples, double rate)
             {
-                if (_disposed || cancellationToken.IsCancellationRequested || _context.Resync().Version != lastResyncVersion) return;
+                if (_disposed || cancellationToken.IsCancellationRequested || _context.Resync().Version != lastResyncVersion)
+                    return;
                 // 控制预写量，让变速及时生效，并持续响应暂停和 Seek。
                 while (_output.IsAvailable && (_context.IsPaused() || _output.GetBufferedDuration() > TimeSpan.FromMilliseconds(150)))
                 {
-                    if (_disposed || cancellationToken.IsCancellationRequested || _context.Resync().Version != lastResyncVersion) return;
+                    if (_disposed || cancellationToken.IsCancellationRequested || _context.Resync().Version != lastResyncVersion)
+                        return;
                     var paused = _context.IsPaused();
                     SetOutputPaused(paused, ref wasPaused);
                     UpdateClock(!paused);
                     Thread.Sleep(10);
                 }
-                if (_disposed || cancellationToken.IsCancellationRequested || _context.Resync().Version != lastResyncVersion) return;
-                if (wasPaused && !_context.IsPaused()) SetOutputPaused(false, ref wasPaused);
-                // 音频链路②输出：直接写音频设备，不经过视频事件。
+                if (_disposed || cancellationToken.IsCancellationRequested || _context.Resync().Version != lastResyncVersion)
+                    return;
+                if (wasPaused && !_context.IsPaused())
+                    SetOutputPaused(false, ref wasPaused);
                 _output.Write(pcm);
                 _timeline.Append(samples / (double)sampleRate, rate);
                 UpdateClock(running: true);
@@ -199,12 +204,14 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             void ServiceControls()
             {
                 if (_disposed || cancellationToken.IsCancellationRequested || _context.IsPaused()
-                    || _context.Resync().Version != lastResyncVersion) return;
+                    || _context.Resync().Version != lastResyncVersion)
+                    return;
                 SetOutputPaused(false, ref wasPaused);
                 tempo = ApplyRateRequest((AVCodecContext*)codecHandle, tempo!, sampleRate, outputChannels, lastResyncVersion, consume);
             }
             cancellationToken.ThrowIfCancellationRequested();
-            if (_disposed) throw new OperationCanceledException();
+            if (_disposed)
+                throw new OperationCanceledException();
             _rates.AudioReady(_rateGeneration);
             foreach (var packetLease in FFmpegPacketReader.ReadWithDrain(_input.Packets, () => _disposed, cancellationToken,
                 ServiceControls, () => _rates.ChangeSignal))
@@ -234,7 +241,8 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
                     SetOutputPaused(false, ref wasPaused);
                     ServiceControls();
 
-                    if (packetLease is not null) _callbacks.PacketConsumed?.Invoke((nint)packetLease.Packet);
+                    if (packetLease is not null)
+                        _callbacks.PacketConsumed?.Invoke((nint)packetLease.Packet);
                     FFmpegErrorHelper.ThrowIfError(ffmpeg.avcodec_send_packet(codecContext, packetLease is null ? null : packetLease.Packet), "avcodec_send_packet");
                     while (!_disposed && !cancellationToken.IsCancellationRequested)
                     {
@@ -260,7 +268,6 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
                         ServiceControls();
                         var activeTempo = tempo!;
                         _timeline.Start(currentTime, activeTempo.Rate);
-                        // 音频链路①绑定：滤镜输出调用上面的 consume。
                         activeTempo.Push(frame, consume);
                         ffmpeg.av_frame_unref(frame);
                     }
@@ -284,10 +291,10 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
         catch (OperationCanceledException)
         {
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             failed = true;
-            FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketAudioPlaybackWorker), _context.InstanceId, $"Event=PacketAudioError SourceKind={_context.Source.Kind} Url={_context.Source.Uri} Error={ex.Message}", ex);
+
             UpdateClock(running: false);
             throw;
         }
@@ -304,16 +311,24 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             UpdateClock(running: false);
             _rates.AudioExited(_rateGeneration, !failed && cleanupFailure is null && !_disposed && !cancellationToken.IsCancellationRequested,
                 faulted: failed || cleanupFailure is not null);
-            if (!failed && cleanupFailure is not null) throw cleanupFailure;
+            if (cleanupFailure is not null)
+            {
+                if (!failed)
+                    throw cleanupFailure;
+                Log.Error(nameof(FFmpegPacketAudioPlaybackWorker),
+                    $"SessionId={_context.InstanceId} Event=AudioCleanupFailed", cleanupFailure);
+            }
 
             // 设备停止失败也必须继续归还滤镜和解码器。
             void Release(Action release)
             {
-                try { release(); }
+                try
+                {
+                    release();
+                }
                 catch (Exception exception)
                 {
                     cleanupErrors.Add(exception);
-                    FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegPacketAudioPlaybackWorker), _context.InstanceId, "Event=AudioCleanupFailed", exception);
                 }
             }
         }
@@ -326,7 +341,8 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
         int sampleRate, int channels, long resyncVersion, TempoPcmConsumer consume)
     {
         var request = _rates.Peek(_rateGeneration, resyncVersion);
-        if (request is null) return active;
+        if (request is null)
+            return active;
         if (request.Rate == active.Rate)
         {
             if (_rates.TryBeginCommit(request, _rateGeneration, resyncVersion))
@@ -398,8 +414,10 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
     private static bool ShouldDropPrerollFrame(TimeSpan timestamp, ref TimeSpan? prerollDropUntil)
     {
         var target = prerollDropUntil;
-        if (target is null) return false;
-        if (timestamp + SeekPrerollTolerance < target.Value) return true;
+        if (target is null)
+            return false;
+        if (timestamp + SeekPrerollTolerance < target.Value)
+            return true;
         prerollDropUntil = null;
         return false;
     }

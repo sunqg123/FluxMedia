@@ -21,7 +21,10 @@ public sealed class VideoFrameLease : IDisposable
     /// <summary>
     /// 帧。
     /// </summary>
-    public VideoFrame Frame { get; }
+    public VideoFrame Frame
+    {
+        get;
+    }
 
     /// <summary>
     /// 释放当前对象持有的资源。

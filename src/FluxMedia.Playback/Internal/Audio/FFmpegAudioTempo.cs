@@ -55,7 +55,8 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
         {
             _graph = ffmpeg.avfilter_graph_alloc();
             _output = ffmpeg.av_frame_alloc();
-            if (_graph == null || _output == null) throw new OutOfMemoryException("无法创建音频变速器。");
+            if (_graph == null || _output == null)
+                throw new OutOfMemoryException("无法创建音频变速器。");
             _graph->nb_threads = 1;
             byte* layout = stackalloc byte[256];
             AVChannelLayout inputLayout = default;
@@ -103,7 +104,8 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
     private AVFilterContext* Create(string filterName, string name, string? options)
     {
         var filter = ffmpeg.avfilter_get_by_name(filterName);
-        if (filter == null) throw new NotSupportedException($"FFmpeg 缺少 {filterName} 音频滤镜。");
+        if (filter == null)
+            throw new NotSupportedException($"FFmpeg 缺少 {filterName} 音频滤镜。");
         AVFilterContext* context = null;
         FFmpegErrorHelper.ThrowIfError(ffmpeg.avfilter_graph_create_filter(&context, filter, name, options, null, _graph), filterName);
         return context;
@@ -135,11 +137,11 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
         while (true)
         {
             var result = ffmpeg.av_buffersink_get_frame(_sink, _output);
-            if (result == ffmpeg.AVERROR(ffmpeg.EAGAIN) || result == ffmpeg.AVERROR_EOF) return;
+            if (result == ffmpeg.AVERROR(ffmpeg.EAGAIN) || result == ffmpeg.AVERROR_EOF)
+                return;
             FFmpegErrorHelper.ThrowIfError(result, "audio filter output");
             try
             {
-                // 音频链路①触发：PCM 回到音频 Worker 的 consume。
                 consume(new ReadOnlySpan<byte>(_output->data[0], checked(_output->nb_samples * _channels * sizeof(short))), _output->nb_samples, _rate);
             }
             finally
@@ -160,7 +162,9 @@ internal sealed unsafe class FFmpegAudioTempo : IDisposable
         _output = null;
         _source = null;
         _sink = null;
-        if (graph != null) ffmpeg.avfilter_graph_free(&graph);
-        if (output != null) ffmpeg.av_frame_free(&output);
+        if (graph != null)
+            ffmpeg.avfilter_graph_free(&graph);
+        if (output != null)
+            ffmpeg.av_frame_free(&output);
     }
 }

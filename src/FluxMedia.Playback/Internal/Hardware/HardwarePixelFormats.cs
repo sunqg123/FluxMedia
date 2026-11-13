@@ -20,7 +20,8 @@ internal static unsafe class HardwarePixelFormats
         for (var index = 0; ; index++)
         {
             var configuration = ffmpeg.avcodec_get_hw_config(codec, index);
-            if (configuration == null) return AVPixelFormat.AV_PIX_FMT_NONE;
+            if (configuration == null)
+                return AVPixelFormat.AV_PIX_FMT_NONE;
 
             if (configuration->device_type == deviceType &&
                 (configuration->methods & HardwareDeviceContextMethod) != 0)
@@ -37,7 +38,8 @@ internal static unsafe class HardwarePixelFormats
     {
         for (var current = formats; current != null && *current != AVPixelFormat.AV_PIX_FMT_NONE; current++)
         {
-            if (*current == preferred) return *current;
+            if (*current == preferred)
+                return *current;
         }
 
         return AVPixelFormat.AV_PIX_FMT_NONE;

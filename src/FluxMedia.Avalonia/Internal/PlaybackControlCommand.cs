@@ -1,5 +1,4 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 using System.Windows.Input;
 
 namespace FluxMedia.Avalonia.Internal;
@@ -60,12 +59,8 @@ internal sealed class PlaybackControlCommand : ICommand
         }
         catch (Exception exception)
         {
-            FluxMediaLog.Write(
-                LogLevel.Error,
-                nameof(PlaybackControlCommand),
-                Guid.Empty,
-                "Event=ControlCommandFailed",
-                exception);
+            Log.Error(nameof(PlaybackControlCommand),
+                "Event=ControlCommandFailed", exception);
         }
         finally
         {

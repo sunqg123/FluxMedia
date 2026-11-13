@@ -1,5 +1,4 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 using NAudio.Wave;
 
 namespace FluxMedia.Playback.Internal.Audio;
@@ -9,7 +8,6 @@ namespace FluxMedia.Playback.Internal.Audio;
 /// </summary>
 internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
 {
-
     /// <summary>
     /// 实例标识。
     /// </summary>
@@ -71,7 +69,10 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     /// <summary>
     /// 最近错误。
     /// </summary>
-    public string? LastError { get; private set; }
+    public string? LastError
+    {
+        get; private set;
+    }
 
     /// <summary>
     /// 当前运行状态。
@@ -83,7 +84,8 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     /// </summary>
     public void Initialize(int sampleRate, int channels)
     {
-        if (IsAvailable) return;
+        if (IsAvailable)
+            return;
         try
         {
             var waveFormat = new WaveFormat(sampleRate, 16, channels);
@@ -105,7 +107,8 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
         {
             LastError = ex.Message;
             _state = AudioOutputState.Failed;
-            FluxMediaLog.Write(LogLevel.Error, nameof(NAudioPlaybackOutput), _instanceId, $"Event=AudioOutputInitFailed Backend={BackendName} SampleRate={sampleRate} Channels={channels} Error={ex.Message}", ex);
+            Log.Error(nameof(NAudioPlaybackOutput),
+                $"SessionId={_instanceId} Event=AudioOutputInitFailed Backend={BackendName} SampleRate={sampleRate} Channels={channels} Error={ex.Message}", ex);
             Dispose();
         }
     }
@@ -188,7 +191,8 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     /// </summary>
     public void Write(ReadOnlySpan<byte> pcm)
     {
-        if (pcm.IsEmpty) return;
+        if (pcm.IsEmpty)
+            return;
         var data = pcm.ToArray();
         Write(data, data.Length);
     }
@@ -199,7 +203,8 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     private void Write(byte[] data, int length)
     {
         var buffer = _buffer;
-        if (buffer is null || length <= 0) return;
+        if (buffer is null || length <= 0)
+            return;
         while (_state is AudioOutputState.Initialized or AudioOutputState.Playing or AudioOutputState.Paused)
         {
             if (buffer.BufferLength - buffer.BufferedBytes >= length)
@@ -241,10 +246,11 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     /// </summary>
     private void OnPlaybackStopped(object? sender, StoppedEventArgs args)
     {
-        if (args.Exception is null || _state is AudioOutputState.Stopped or AudioOutputState.Disposed) return;
+        if (args.Exception is null || _state is AudioOutputState.Stopped or AudioOutputState.Disposed)
+            return;
         LastError = args.Exception.Message;
         _state = AudioOutputState.Failed;
-        FluxMediaLog.Write(
-            LogLevel.Error, nameof(NAudioPlaybackOutput), _instanceId, $"Event=AudioOutputPlaybackStoppedUnexpectedly Backend={BackendName} Error={args.Exception.Message}", args.Exception);
+        Log.Error(nameof(NAudioPlaybackOutput),
+            $"SessionId={_instanceId} Event=AudioOutputPlaybackStoppedUnexpectedly Backend={BackendName} Error={args.Exception.Message}", args.Exception);
     }
 }

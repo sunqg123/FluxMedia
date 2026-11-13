@@ -24,7 +24,10 @@ internal sealed unsafe partial class FFmpegSharedDemuxer
         /// <summary>
         /// 目标。
         /// </summary>
-        public TimeSpan Target { get; }
+        public TimeSpan Target
+        {
+            get;
+        }
 
         /// <summary>
         /// 是否已完成。

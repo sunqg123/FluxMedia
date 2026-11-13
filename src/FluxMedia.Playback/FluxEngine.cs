@@ -1,5 +1,4 @@
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
+using LogConverge.Sharp;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.Playback.Internal;
 
@@ -23,10 +22,6 @@ public static class FluxEngine
     /// </summary>
     private static FluxEngineOptions? _options;
     /// <summary>
-    /// 引擎创建的日志输出版本。
-    /// </summary>
-    private static long? _logGeneration;
-    /// <summary>
     /// 并发关闭共享的完成任务。
     /// </summary>
     private static Task? _shutdownTask;
@@ -44,14 +39,6 @@ public static class FluxEngine
             }
         }
     }
-    /// <summary>
-    /// 当前日志目录。
-    /// </summary>
-    public static string? LogDirectory => FluxMediaLog.LogDirectory;
-    /// <summary>
-    /// 当前日志文件。
-    /// </summary>
-    public static string? CurrentLogFilePath => FluxMediaLog.CurrentLogFilePath;
     /// <summary>
     /// 当前由引擎管理的播放器快照。
     /// </summary>
@@ -73,7 +60,8 @@ public static class FluxEngine
     {
         lock (SyncRoot)
         {
-            if (_shutdownTask is not null) throw new InvalidOperationException("引擎正在关闭，请等待 ShutdownAsync 完成。");
+            if (_shutdownTask is not null)
+                throw new InvalidOperationException("引擎正在关闭，请等待 ShutdownAsync 完成。");
             if (_options is not null)
             {
                 if (options is not null && options != _options)
@@ -84,20 +72,18 @@ public static class FluxEngine
             }
             var actual = options ?? new FluxEngineOptions();
             PlaybackRatePolicy.ValidateOptions(actual);
-            long? generation = null;
+            var logResult = Log.Initialize(Path.Combine(AppContext.BaseDirectory, "Logs"), actual.EnableLogging);
+            if (logResult is not LogResult.Ok and not LogResult.AlreadyInitialized)
+                throw new InvalidOperationException($"日志初始化失败：{logResult}。");
             try
             {
-                if (actual.EnableLogging)
-                {
-                    generation = FluxMediaLog.ConfigureForEngine(new LoggingOptions());
-                }
                 FFmpegNativeRuntime.Initialize(actual.FFmpegPath);
-                _logGeneration = generation;
                 _options = actual;
+                Log.Info(nameof(FluxEngine), "Event=EngineStarted");
             }
-            catch
+            catch (Exception exception)
             {
-                if (generation.HasValue) FluxMediaLog.ShutdownIfCurrent(generation.Value);
+                Log.Error(nameof(FluxEngine), "Event=EngineStartFailed", exception);
                 throw;
             }
         }
@@ -110,8 +96,10 @@ public static class FluxEngine
     {
         lock (SyncRoot)
         {
-            if (_shutdownTask is not null) throw new InvalidOperationException("引擎正在关闭，不能创建播放器。");
-            if (_options is null) throw new InvalidOperationException("引擎尚未初始化，请先调用 FluxEngine.Start。");
+            if (_shutdownTask is not null)
+                throw new InvalidOperationException("引擎正在关闭，不能创建播放器。");
+            if (_options is null)
+                throw new InvalidOperationException("引擎尚未初始化，请先调用 FluxEngine.Start。");
             var actual = options ?? new PlaybackOptions();
             var player = new Player(new PlaybackSession(_options, actual));
             ActivePlayers.Add(player.InstanceId, player);
@@ -125,7 +113,8 @@ public static class FluxEngine
     public static async Task StopAsync(CancellationToken cancellationToken = default)
     {
         Player[] players;
-        lock (SyncRoot) players = ActivePlayers.Values.ToArray();
+        lock (SyncRoot)
+            players = ActivePlayers.Values.ToArray();
         await Task.WhenAll(players.Select(player => player.StopAsync(cancellationToken).AsTask())).ConfigureAwait(false);
     }
     /// <summary>
@@ -139,11 +128,12 @@ public static class FluxEngine
     {
         lock (SyncRoot)
         {
-            if (_shutdownTask is not null) return _shutdownTask;
-            if (_options is null && ActivePlayers.Count == 0) return Task.CompletedTask;
+            if (_shutdownTask is not null)
+                return _shutdownTask;
+            if (_options is null && ActivePlayers.Count == 0)
+                return Task.CompletedTask;
             var players = ActivePlayers.Values.ToArray();
-            var generation = _logGeneration;
-            return _shutdownTask = Task.Run(() => ShutdownCoreAsync(players, generation));
+            return _shutdownTask = Task.Run(() => ShutdownCoreAsync(players));
         }
     }
     /// <summary>
@@ -153,16 +143,17 @@ public static class FluxEngine
     /// <summary>
     /// 等待播放器归还资源后清除共享状态。
     /// </summary>
-    private static async Task ShutdownCoreAsync(Player[] players, long? generation)
+    private static async Task ShutdownCoreAsync(Player[] players)
     {
         var errors = new List<Exception>();
         try
         {
-            try { await Task.WhenAll(players.Select(player => player.DisposeAsync().AsTask())).ConfigureAwait(false); }
+            try
+            {
+                await Task.WhenAll(players.Select(player => player.DisposeAsync().AsTask())).ConfigureAwait(false);
+            }
             catch (Exception exception) { errors.Add(exception); }
             Release(FFmpegNativeRuntime.Shutdown);
-            Release(FluxMediaLog.Flush);
-            if (generation.HasValue) Release(() => FluxMediaLog.ShutdownIfCurrent(generation.Value));
         }
         finally
         {
@@ -170,16 +161,24 @@ public static class FluxEngine
             {
                 ActivePlayers.Clear();
                 _options = null;
-                _logGeneration = null;
                 _shutdownTask = null;
             }
         }
-        if (errors.Count > 0) throw new AggregateException("引擎关闭期间发生资源释放错误。", errors);
+        if (errors.Count > 0)
+        {
+            var failure = new AggregateException("引擎关闭期间发生资源释放错误。", errors);
+            Log.Error(nameof(FluxEngine), "Event=EngineShutdownFailed", failure);
+            throw failure;
+        }
+        Log.Info(nameof(FluxEngine), "Event=EngineStopped");
 
-        // 播放器释放失败后仍关闭共享原生环境和日志。
+        // 播放器释放失败后仍关闭共享原生环境。
         void Release(Action release)
         {
-            try { release(); }
+            try
+            {
+                release();
+            }
             catch (Exception exception) { errors.Add(exception); }
         }
     }
@@ -188,6 +187,7 @@ public static class FluxEngine
     /// </summary>
     internal static void Unregister(Player player)
     {
-        lock (SyncRoot) ActivePlayers.Remove(player.InstanceId);
+        lock (SyncRoot)
+            ActivePlayers.Remove(player.InstanceId);
     }
 }

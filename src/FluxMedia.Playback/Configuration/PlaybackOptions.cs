@@ -43,7 +43,10 @@ public sealed record PlaybackOptions
     /// <summary>
     /// 是否以静音状态开始。
     /// </summary>
-    public bool InitialMuted { get; init; }
+    public bool InitialMuted
+    {
+        get; init;
+    }
 
     /// <summary>
     /// 硬件解码的启用策略。

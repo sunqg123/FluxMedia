@@ -12,5 +12,8 @@ internal readonly record struct PlaybackResyncRequest(long Version, TimeSpan Pos
     /// <summary>
     /// 该次同步可以发布的帧代次。
     /// </summary>
-    internal VideoFrameEpoch? FrameEpoch { get; init; }
+    internal VideoFrameEpoch? FrameEpoch
+    {
+        get; init;
+    }
 }

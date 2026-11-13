@@ -27,6 +27,7 @@ await player.StopAsync();
 Player 在释放通知前登记共享任务，重复或通知回调中的 DisposeAsync 调用取得同一任务；清理异常与取消会传回等待者。
 通知处理函数仍需及时返回，不应在释放通知内部同步阻塞等待该释放任务。
 打开、打开并播放和录制命令统一经过锁前、锁后的释放检查；排队期间开始释放的命令取得锁后不会再访问会话。
+命令锁仅使用托管异步等待，随对象回收，不在仍可能有等待者时销毁；迟到调用取得锁后被释放检查拒绝，并继续放行后续等待者。
 OpenAndPlayAsync 在打开完成及通知之后还会检查释放状态，避免通知回调触发释放后继续启动播放。
 
 `SetVolumeAsync` 只接受 0～1 之间的有限值，非法值沿用 PlaybackException / InvalidState 的错误反馈，拒绝后不改音量或调用设备。
@@ -215,13 +216,24 @@ await player.StopRecordingAsync();
 ```
 
 录制是数据包重封装，输出容器需支持源编码。诊断从 Recording 和 GetRecordingDiagnosticInfo 读取。
+PlaybackRecordingOptions 不再提供 VideoBitrateKbps；重封装沿用源编码和码率，不进行转码。
 同一播放器显式打开媒体时会结束旧录制，包括再次打开相同地址；内部网络恢复沿用录制转移流程。
 录制收尾失败时保留失败诊断并发出 `Faulted`；打开新媒体和停止播放会在旧管线清理后抛出
 `PlaybackException`，其 `PlaybackError` 为 `RecordingFailed`。切源不会继续打开新媒体并覆盖旧录制错误。
-日志使用 `FluxMedia.Core.Logging.FluxMediaLog`，见 [日志说明](logging.md)。
+日志由 `LogConverge.Sharp.Log` 提供，在 `FluxEngine.Start` 初始化，见 [日志说明](logging.md)。
 
 停止录制的取消令牌在接受停止前生效；开始收尾后会等待排空、封装和释放，
 返回实际文件结果，避免已完成的文件被标记为取消失败。
+
+没有管线时开始录制会预约为 Starting；实际创建录制器后变为 Recording。
+停止尚未启动的预约会回到 Idle，表示预约已取消，不表示创建了录制文件。
+入队、数据包复制或容器写入失败会终止本次录制并保留 Failed，文件仍尽力完成封装；
+随后再次开始录制时，会先释放旧实例，再创建新的录制器。
+当前录制器异步进入终态时会触发 Player.PlaybackChanged，订阅方应读取最新 RecordingState；
+通知不在录制写入线程执行，界面订阅方仍需派发到 UI 线程，旧实例的通知不会覆盖新录制。
+
+StopAsync 的取消令牌仅在接受停止前生效；一旦开始取消播放操作，便等待清理完成，
+不再因调用方取消而遗留半停止状态。停止期间开始释放播放器时，最终状态可为 Disposed。
 录制诊断的 `VideoCodec` 从当前媒体信息读取，未知时为 null。
 `OutputFileFinalized` 表示文件尾写入和 IO 关闭均成功；实际文件录制未收到有效数据包时为 `Failed`。
 文件大小和存在状态仅在显式读取录制诊断时查询；读取失败返回 null，不改变录制结果。

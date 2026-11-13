@@ -1,9 +1,6 @@
 using FFmpeg.AutoGen;
-using FluxMedia.Core.Configuration;
-using FluxMedia.Core.Logging;
 using FluxMedia.Core.Models;
 using FluxMedia.Playback;
-using FluxMedia.Playback.Internal;
 
 namespace FluxMedia.FFmpeg.Pipeline;
 
@@ -21,14 +18,9 @@ internal sealed partial class FFmpegSharedDemuxer
     private readonly List<FFmpegPacketLease> _recordingPrerollPackets = new();
 
     /// <summary>
-    /// 录制。
+    /// 借用的录制器，由会话录制控制器负责释放。
     /// </summary>
     private FFmpegPacketRemuxRecorder? _recording;
-
-    /// <summary>
-    /// 待处理录制配置。
-    /// </summary>
-    private PlaybackRecordingOptions? _pendingRecordingOptions;
 
     /// <summary>
     /// 录制预滚字节。
@@ -46,22 +38,14 @@ internal sealed partial class FFmpegSharedDemuxer
     private const long MaxRecordingPrerollBytes = 64L * 1024 * 1024;
 
     /// <summary>
-    /// 录制实际结果。
+    /// 根据已打开的流创建录制器，所有权交给调用方。
     /// </summary>
-    public PlaybackRecordingResult? RecordingResult
-    {
-        get { lock (_recordingSync) return _recording?.Result; }
-    }
-
-    /// <summary>
-    /// 启动当前媒体的包级录制。
-    /// </summary>
-    public void StartRecording(PlaybackRecordingOptions options)
+    public FFmpegPacketRemuxRecorder CreateRecorder(PlaybackRecordingOptions options)
     {
         ThrowIfDisposed();
-        _pendingRecordingOptions = options;
-        if (VideoStream is null && AudioStream is null) return;
-        StartPendingRecordingIfNeeded();
+        if (VideoStream is null && AudioStream is null)
+            throw new InvalidOperationException("No audio or video streams are available for recording.");
+        return new FFmpegPacketRemuxRecorder(options, _instanceId, VideoStream, AudioStream);
     }
 
     /// <summary>
@@ -109,22 +93,20 @@ internal sealed partial class FFmpegSharedDemuxer
     }
 
     /// <summary>
-    /// 解除录制关联并返回录制结果。
+    /// 解除借用关系，不释放录制器。
     /// </summary>
-    public FFmpegPacketRemuxRecorder? DetachRecording()
+    public void DetachRecording()
     {
         lock (_recordingSync)
         {
-            var recording = _recording;
             _recording = null;
-            return recording;
         }
     }
 
     /// <summary>
     /// 关联当前录制器并准备写入播放数据包。
     /// </summary>
-    public void AttachRecording(FFmpegPacketRemuxRecorder recording)
+    public bool AttachRecording(FFmpegPacketRemuxRecorder recording)
     {
         if (recording is null)
         {
@@ -133,73 +115,16 @@ internal sealed partial class FFmpegSharedDemuxer
         ThrowIfDisposed();
         lock (_recordingSync)
         {
+            if (ReferenceEquals(_recording, recording))
+                return false;
             if (_recording is not null)
             {
                 throw new InvalidOperationException("A recording is already attached to this demuxer.");
             }
 
             _recording = recording;
-            _pendingRecordingOptions = null;
             FlushRecordingPreroll(recording);
-        }
-    }
-
-    /// <summary>
-    /// 等待录制排空、封装并释放，再解除关联。
-    /// </summary>
-    public async ValueTask<PlaybackRecordingResult?> StopRecordingAsync()
-    {
-        FFmpegPacketRemuxRecorder? recording;
-        lock (_recordingSync)
-        {
-            recording = _recording;
-        }
-        if (recording is null) return null;
-
-        try
-        {
-            Exception? failure = null;
-            try { await recording.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception exception)
-            {
-                failure = exception;
-                FluxMediaLog.Write(LogLevel.Error, nameof(FFmpegSharedDemuxer), _instanceId, "Event=RecordingCleanupFailed", exception);
-            }
-            var result = recording.Result;
-            return failure is null ? result : result with
-            {
-                State = PlaybackRecordingState.Failed,
-                LastError = failure.Message
-            };
-        }
-        finally
-        {
-            lock (_recordingSync)
-            {
-                if (ReferenceEquals(_recording, recording)) _recording = null;
-            }
-        }
-    }
-
-    /// <summary>
-    /// 具备流信息后启动等待中的录制。
-    /// </summary>
-    private void StartPendingRecordingIfNeeded()
-    {
-        var options = _pendingRecordingOptions;
-        if (options is null || _recording is not null) return;
-        if (VideoStream is null && AudioStream is null)
-        {
-            throw new InvalidOperationException("No audio or video streams are available for recording.");
-        }
-
-        var recording = new FFmpegPacketRemuxRecorder(options, _instanceId, VideoStream, AudioStream);
-        recording.Start();
-        lock (_recordingSync)
-        {
-            _recording = recording;
-            _pendingRecordingOptions = null;
-            FlushRecordingPreroll(recording);
+            return true;
         }
     }
 
@@ -208,7 +133,8 @@ internal sealed partial class FFmpegSharedDemuxer
     /// </summary>
     private unsafe void CacheRecordingPreroll(AVPacket* packet)
     {
-        if (_source.Kind != MediaSourceKind.File || packet == null || VideoStream is null) return;
+        if (_source.Kind != MediaSourceKind.File || packet == null || VideoStream is null)
+            return;
         if (packet->stream_index == VideoStream.StreamIndex)
         {
             if ((packet->flags & ffmpeg.AV_PKT_FLAG_KEY) != 0)
@@ -217,13 +143,16 @@ internal sealed partial class FFmpegSharedDemuxer
                 _recordingPrerollVideoKeyUs = PacketTimestampUs(packet, VideoStream.TimeBase);
             }
 
-            if (_recordingPrerollVideoKeyUs is null) return;
+            if (_recordingPrerollVideoKeyUs is null)
+                return;
         }
         else if (AudioStream is not null && packet->stream_index == AudioStream.StreamIndex)
         {
-            if (_recordingPrerollVideoKeyUs is null) return;
+            if (_recordingPrerollVideoKeyUs is null)
+                return;
             var audioTimestampUs = PacketTimestampUs(packet, AudioStream.TimeBase);
-            if (audioTimestampUs is not null && audioTimestampUs < _recordingPrerollVideoKeyUs) return;
+            if (audioTimestampUs is not null && audioTimestampUs < _recordingPrerollVideoKeyUs)
+                return;
         }
         else
         {
@@ -244,7 +173,8 @@ internal sealed partial class FFmpegSharedDemuxer
     /// </summary>
     private unsafe void FlushRecordingPreroll(FFmpegPacketRemuxRecorder recording)
     {
-        if (_recordingPrerollPackets.Count == 0) return;
+        if (_recordingPrerollPackets.Count == 0)
+            return;
         var packets = _recordingPrerollPackets.OrderBy(packet => RecordingPacketTimestampUs(packet.Packet)).ToArray();
         _recordingPrerollPackets.Clear();
         _recordingPrerollBytes = 0;
@@ -256,9 +186,6 @@ internal sealed partial class FFmpegSharedDemuxer
                 recording.TryWrite(packet.Packet);
             }
         }
-
-        FluxMediaLog.Write(
-            LogLevel.Information, nameof(FFmpegSharedDemuxer), _instanceId, $"Event=RecordingPrerollFlushed Packets={packets.Length} Source={_source.Uri}");
     }
 
     /// <summary>
