@@ -1,7 +1,7 @@
-using LogConverge.Sharp;
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal.Audio;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Playback.Internal;
 
@@ -120,10 +120,6 @@ internal sealed partial class PlaybackPipeline : IAsyncDisposable
         get; private set;
     }
     /// <summary>
-    /// 解复用任务是否已退出。
-    /// </summary>
-    public bool DemuxerExited => _demuxTask?.IsCompleted == true;
-    /// <summary>
     /// 管线是否已被取消。
     /// </summary>
     public bool IsCanceled => Volatile.Read(ref _stopping) != 0 || _lifetime.IsCancellationRequested;
@@ -141,10 +137,6 @@ internal sealed partial class PlaybackPipeline : IAsyncDisposable
     /// 当前音频设备是否可用。
     /// </summary>
     public bool AudioOutputAvailable => _audioOutput?.IsAvailable == true;
-    /// <summary>
-    /// 当前音频输出后端。
-    /// </summary>
-    public string AudioBackend => _audioOutput?.BackendName ?? "None";
 
     /// <summary>
     /// 打开一次媒体并停留在读包闸门，避免再次打开本地文件。

@@ -9,18 +9,15 @@
     <Authors>FluxMedia</Authors>
     <Description>Avalonia 11/12 playback controls for FluxMedia on .NET 6 and later, targeting .NET Standard 2.1.</Description>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-    <DebugType Condition="'$(Configuration)' != 'Debug'">none</DebugType>
-    <DebugSymbols Condition="'$(Configuration)' != 'Debug'">false</DebugSymbols>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): controls manage PlayerBinding for UI notifications, two-way properties and display time. ControlBarTemplate now receives PlayerBinding; collections still contain Player. UI speed presets belong to FluxPlayerControl.DefaultSpeeds. Customizable controls, overlays, template synchronization and idle-based visibility.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): bounds GPU image import caching, releases lost and evicted resources, clears stale GPU output and filters obsolete presentation tasks. Improves recording binding notifications and diagnostic reads. Logging uses LogConverge.Sharp through FluxMedia.Playback. Depends on FluxMedia.Playback $(FluxMediaVersion); existing PlayerBinding and customizable control templates are retained.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
-    <DebugType>portable</DebugType>
-    <DebugSymbols>true</DebugSymbols>
     <Optimize>false</Optimize>
   </PropertyGroup>
 

@@ -74,11 +74,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     private TimeSpan? _lastTimestamp;
 
     /// <summary>
-    /// 当前已处理到的媒体时间。
-    /// </summary>
-    private TimeSpan _currentTime;
-
-    /// <summary>
     /// 队列当前缓存的媒体时长。
     /// </summary>
     private TimeSpan _bufferedDuration;
@@ -105,20 +100,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     /// 供解码线程读取缓存数据包的入口。
     /// </summary>
     public ChannelReader<FFmpegPacketLease> Reader => _reader;
-
-    /// <summary>
-    /// 当前处理到的媒体时间。
-    /// </summary>
-    public TimeSpan CurrentTime
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _currentTime;
-            }
-        }
-    }
 
     /// <summary>
     /// 缓冲时长。
@@ -312,7 +293,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
             Interlocked.Increment(ref _queuedPacketCount);
             _lastTimestamp = timestamp.Value;
             _firstTimestamp ??= timestamp.Value;
-            _currentTime = _firstTimestamp.Value;
             _bufferedDuration = _lastTimestamp.Value >= _firstTimestamp.Value ? _lastTimestamp.Value - _firstTimestamp.Value : _fallbackPacketDuration * Math.Max(1, Count);
         }
     }
@@ -334,7 +314,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
 
             if (timestamp is not null)
             {
-                _currentTime = timestamp.Value;
                 _firstTimestamp = timestamp.Value;
             }
 
@@ -356,7 +335,6 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     {
         _firstTimestamp = null;
         _lastTimestamp = null;
-        _currentTime = TimeSpan.Zero;
         _bufferedDuration = TimeSpan.Zero;
         Interlocked.Exchange(ref _queuedPacketCount, 0);
     }

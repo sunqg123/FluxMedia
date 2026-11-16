@@ -21,10 +21,9 @@ internal sealed unsafe class FFmpegStreamDescriptor : IDisposable
     /// <summary>
     /// 初始化 FFmpeg 流描述所需的状态和资源。
     /// </summary>
-    public FFmpegStreamDescriptor(int streamIndex, AVMediaType mediaType, AVRational timeBase, AVRational averageFrameRate, AVRational realFrameRate, TimeSpan startTime, AVCodecParameters* sourceCodecParameters)
+    public FFmpegStreamDescriptor(int streamIndex, AVRational timeBase, AVRational averageFrameRate, AVRational realFrameRate, TimeSpan startTime, AVCodecParameters* sourceCodecParameters)
     {
         StreamIndex = streamIndex;
-        MediaType = mediaType;
         TimeBase = timeBase;
         AverageFrameRate = averageFrameRate;
         RealFrameRate = realFrameRate;
@@ -43,14 +42,6 @@ internal sealed unsafe class FFmpegStreamDescriptor : IDisposable
     /// 流索引。
     /// </summary>
     public int StreamIndex
-    {
-        get;
-    }
-
-    /// <summary>
-    /// 媒体类型。
-    /// </summary>
-    public AVMediaType MediaType
     {
         get;
     }

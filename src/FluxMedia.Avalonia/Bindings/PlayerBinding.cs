@@ -1,7 +1,7 @@
-using LogConverge.Sharp;
 using Avalonia.Threading;
 using FluxMedia.Core.Models;
 using FluxMedia.Playback;
+using LogConverge.Sharp;
 using System.Collections.Concurrent;
 using System.ComponentModel;
 

@@ -1,9 +1,9 @@
-using LogConverge.Sharp;
 using FluxMedia.Core.Errors;
 using FluxMedia.Core.Models;
 using FluxMedia.Core.State;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Playback;
 
@@ -129,11 +129,6 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
     /// 当前跳转实际开始执行的时间。
     /// </summary>
     private PlaybackSeekFrame? _activeSeek;
-
-    /// <summary>
-    /// 当前实际执行中的跳转请求编号。
-    /// </summary>
-    private long ActiveSeekRequestId => _activeSeek?.RequestId ?? 0;
 
     /// <summary>
     /// 显示端最新声明的 GPU 输出能力。

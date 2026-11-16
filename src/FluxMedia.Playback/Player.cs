@@ -1,7 +1,7 @@
-using LogConverge.Sharp;
 using FluxMedia.Core.Errors;
 using FluxMedia.Core.Models;
 using FluxMedia.Playback.Internal;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Playback;
 

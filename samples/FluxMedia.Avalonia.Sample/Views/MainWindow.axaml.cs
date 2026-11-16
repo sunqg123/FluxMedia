@@ -1,4 +1,3 @@
-using LogConverge.Sharp;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -7,6 +6,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using FluxMedia.Avalonia.Sample.ViewModels;
 using FluxMedia.Playback;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Avalonia.Sample.Views;
 

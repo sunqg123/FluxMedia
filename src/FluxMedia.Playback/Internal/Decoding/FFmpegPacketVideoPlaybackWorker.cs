@@ -1,10 +1,10 @@
-using LogConverge.Sharp;
 using FFmpeg.AutoGen;
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Extensions;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal.Hardware;
+using LogConverge.Sharp;
 using System.Runtime.InteropServices;
 using CorePixelFormat = FluxMedia.Core.Models.PixelFormat;
 

@@ -1,4 +1,3 @@
-using LogConverge.Sharp;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
@@ -8,6 +7,7 @@ using Avalonia.Rendering.Composition;
 using Avalonia.Threading;
 using FluxMedia.Core.Models;
 using FluxMedia.Playback;
+using LogConverge.Sharp;
 using System.Diagnostics;
 using AvaloniaPixelFormat = Avalonia.Platform.PixelFormat;
 using FluxPixelFormat = FluxMedia.Core.Models.PixelFormat;

@@ -1,8 +1,8 @@
-using LogConverge.Sharp;
 using Avalonia.Threading;
 using FluxMedia.Avalonia.Bindings;
 using FluxMedia.Core.Errors;
 using FluxMedia.Playback;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Avalonia;
 

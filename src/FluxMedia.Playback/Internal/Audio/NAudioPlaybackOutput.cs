@@ -24,24 +24,9 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     private BufferedWaveProvider? _buffer;
 
     /// <summary>
-    /// 当前 Windows 音频输出采用的 PCM 格式。
-    /// </summary>
-    private PcmAudioFormat? _format;
-
-    /// <summary>
     /// 音频设备期望的缓冲延迟（毫秒）。
     /// </summary>
     private const int DesiredLatencyMs = 100;
-
-    /// <summary>
-    /// 当前音量，范围为 0 到 1。
-    /// </summary>
-    private double _volume = 1;
-
-    /// <summary>
-    /// 是否静音。
-    /// </summary>
-    private bool _muted;
 
     /// <summary>
     /// 状态。
@@ -100,7 +85,6 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
             };
             _waveOut.PlaybackStopped += OnPlaybackStopped;
             _waveOut.Init(_buffer);
-            _format = new PcmAudioFormat(sampleRate, channels);
             _state = AudioOutputState.Initialized;
         }
         catch (Exception ex)
@@ -162,11 +146,10 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
     /// </summary>
     public void SetVolume(double volume, bool muted)
     {
-        _volume = Math.Clamp(volume, 0, 1);
-        _muted = muted;
+        var actualVolume = Math.Clamp(volume, 0, 1);
         if (_waveOut is not null)
         {
-            _waveOut.Volume = muted ? 0f : (float)_volume;
+            _waveOut.Volume = muted ? 0f : (float)actualVolume;
         }
     }
 

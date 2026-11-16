@@ -1,9 +1,9 @@
 using FFmpeg.AutoGen;
-using LogConverge.Sharp;
 using FluxMedia.FFmpeg.Extensions;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal.Audio;
+using LogConverge.Sharp;
 
 namespace FluxMedia.Playback.Internal;
 

@@ -1,9 +1,9 @@
-using LogConverge.Sharp;
 using FFmpeg.AutoGen;
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.Playback;
 using FluxMedia.Playback.Internal;
+using LogConverge.Sharp;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 
@@ -147,24 +147,9 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     public ChannelReader<FFmpegPacketLease> AudioPackets => _audioPackets.Reader;
 
     /// <summary>
-    /// 当前处理到的媒体时间。
-    /// </summary>
-    public TimeSpan CurrentTime => VideoStream is not null ? _videoPackets.CurrentTime : _audioPackets.CurrentTime;
-
-    /// <summary>
-    /// 缓冲时长。
-    /// </summary>
-    public TimeSpan BufferedDuration => VideoStream is not null ? _videoPackets.BufferedDuration : _audioPackets.BufferedDuration;
-
-    /// <summary>
     /// 视频缓冲时长。
     /// </summary>
     public TimeSpan VideoBufferedDuration => _videoPackets.BufferedDuration;
-
-    /// <summary>
-    /// 音频缓冲时长。
-    /// </summary>
-    public TimeSpan AudioBufferedDuration => _audioPackets.BufferedDuration;
 
     /// <summary>
     /// 视频包数量。
@@ -627,7 +612,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             var stream = formatContext->streams[index];
             if (stream != null && stream->codecpar != null && stream->codecpar->codec_type == mediaType)
             {
-                return new FFmpegStreamDescriptor(index, mediaType, stream->time_base, stream->avg_frame_rate, stream->r_frame_rate, MediaStartTime(formatContext, stream), stream->codecpar);
+                return new FFmpegStreamDescriptor(index, stream->time_base, stream->avg_frame_rate, stream->r_frame_rate, MediaStartTime(formatContext, stream), stream->codecpar);
             }
         }
         return null;

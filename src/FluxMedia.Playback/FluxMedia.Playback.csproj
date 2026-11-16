@@ -13,17 +13,14 @@
     <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <DebugType Condition="'$(Configuration)' != 'Debug'">none</DebugType>
-    <DebugSymbols Condition="'$(Configuration)' != 'Debug'">false</DebugSymbols>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): UI binding moved to PlayerBinding in the Avalonia package; Player exposes read-only actual values, async commands and triggering-thread events. Playback rates default to the configurable 0.1-10 range. Bounds are configured globally in FluxEngineOptions and validated by Start. Audio filter stage counts are derived automatically from both bounds; MaxAudioTempoStages is read-only. Start rejects ranges requiring more than 16 stages. Audio/video rate confirmation, seek interruption, recording finalization and resource cleanup fixes. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): fixes recording ownership, queue failure handling, final-state notifications and stop/disposal races. Improves GPU resource cleanup and diagnostic snapshots. Logging now uses LogConverge.Sharp 0.7.0, initialized by FluxEngine.Start, with fewer high-frequency and duplicate messages. Breaking changes: removes FluxMediaLog, its configuration and log-path APIs, PlaybackRecordingOptions.VideoBitrateKbps and VideoOutputCapabilities.DeviceUuid. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
-    <DebugType>portable</DebugType>
-    <DebugSymbols>true</DebugSymbols>
     <Optimize>false</Optimize>
   </PropertyGroup>
   <ItemGroup>

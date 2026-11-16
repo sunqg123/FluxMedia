@@ -1,6 +1,6 @@
-using LogConverge.Sharp;
 using FFmpeg.AutoGen;
 using FluxMedia.FFmpeg.Native;
+using LogConverge.Sharp;
 using System.Runtime.InteropServices;
 
 namespace FluxMedia.Playback.Internal.Hardware;
