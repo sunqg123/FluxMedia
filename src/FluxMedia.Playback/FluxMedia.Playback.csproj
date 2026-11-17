@@ -16,7 +16,7 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): fixes recording ownership, queue failure handling, final-state notifications and stop/disposal races. Improves GPU resource cleanup and diagnostic snapshots. Logging now uses LogConverge.Sharp 0.7.0, initialized by FluxEngine.Start, with fewer high-frequency and duplicate messages. Breaking changes: removes FluxMediaLog, its configuration and log-path APIs, PlaybackRecordingOptions.VideoBitrateKbps and VideoOutputCapabilities.DeviceUuid. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): updates LogConverge.Sharp to 0.7.1. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
   </PropertyGroup>
@@ -33,7 +33,7 @@
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="FFmpeg.AutoGen" Version="$(FFmpegAutoGenVersion)" />
-    <PackageReference Include="LogConverge.Sharp" Version="0.7.0" />
+    <PackageReference Include="LogConverge.Sharp" Version="0.7.1" />
     <PackageReference Include="NAudio.Core" Version="2.2.1" />
     <PackageReference Include="NAudio.WinMM" Version="2.2.1" />
     <PackageReference Include="Silk.NET.Direct3D11" Version="2.23.0" />

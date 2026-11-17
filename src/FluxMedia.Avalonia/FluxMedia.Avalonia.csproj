@@ -12,7 +12,7 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): bounds GPU image import caching, releases lost and evicted resources, clears stale GPU output and filters obsolete presentation tasks. Improves recording binding notifications and diagnostic reads. Logging uses LogConverge.Sharp through FluxMedia.Playback. Depends on FluxMedia.Playback $(FluxMediaVersion); existing PlayerBinding and customizable control templates are retained.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): updates the dependency on FluxMedia.Playback to $(FluxMediaVersion), which uses LogConverge.Sharp 0.7.1.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <PackageReadmeFile>README.md</PackageReadmeFile>
