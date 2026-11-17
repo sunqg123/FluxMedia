@@ -619,7 +619,7 @@ public sealed class PlayerBinding : INotifyPropertyChanged, IDisposable
     private void LogFailure(string propertyName, string message, Exception? exception = null)
     {
         if (!_disposed)
-            Log.Write(LogLevel.Warning, nameof(PlayerBinding),
+            FluxEngine.Logger.Write(LogLevel.Warning, nameof(PlayerBinding),
                 $"SessionId={Player.InstanceId} Event=PlaybackBindingFailed Property={propertyName} Message={message}", exception);
     }
 

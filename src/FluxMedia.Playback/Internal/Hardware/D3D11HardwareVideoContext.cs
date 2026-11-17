@@ -111,7 +111,7 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
             error = ex.Message;
             context?.Dispose();
             context = null;
-            Log.Write(LogLevel.Warning, nameof(D3D11HardwareVideoContext),
+            FluxEngine.Logger.Write(LogLevel.Warning, nameof(D3D11HardwareVideoContext),
                 $"SessionId={instanceId} Event=HardwareVideoDeviceCreateFailed Backend=D3D11VA Error={ex.Message}", ex);
             return false;
         }

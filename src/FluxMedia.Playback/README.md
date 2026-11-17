@@ -66,12 +66,11 @@ Applications using values outside this range must configure the bounds in `FluxE
   Native libraries are supplied by the application.
 - Configure FFmpeg through `FluxEngineOptions.FFmpegPath` or
   `FLUXMEDIA_FFMPEG_ROOT`.
-- Logging uses `LogConverge.Sharp.Log` and is initialized by `FluxEngine.Start`.
-  Set `FluxEngineOptions.EnableLogging = true` to enable file output in `Logs`
-  under the application directory. Logging is disabled by default; the host's
-  first initialization takes precedence. The dependency currently includes
-  Windows x64 native binaries; leave logging disabled on other platforms.
-  Engine shutdown leaves the shared logger available until process exit.
+- FluxMedia uses a dedicated log instance. Set `FluxEngineOptions.EnableLogging`
+  to enable its file output. Logs go to `Logs/FluxMedia` under the application
+  directory by default, or to `FluxEngineOptions.LogDirectory` when configured.
+  Engine shutdown drains the FluxMedia instance. The host manages its own logger.
+  The bundled logging dependency currently supports Windows x64.
 - Camera and screen recording are not part of this package.
 
 `FFmpegLibraries.RequiredFileNames` lists the files required by the selected

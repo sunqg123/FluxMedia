@@ -12,7 +12,7 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): updates the dependency on FluxMedia.Playback to $(FluxMediaVersion), which uses LogConverge.Sharp 0.7.1.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): routes player control diagnostics to the FluxMedia.Playback logging instance.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <PackageReadmeFile>README.md</PackageReadmeFile>

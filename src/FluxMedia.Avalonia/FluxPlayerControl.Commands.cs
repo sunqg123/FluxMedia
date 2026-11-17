@@ -49,7 +49,7 @@ public sealed partial class FluxPlayerControl
         {
             if (IsCurrentPlayer(player, version))
                 ReportError(exception.Message);
-            Log.Write(LogLevel.Warning, nameof(FluxPlayerControl),
+            FluxEngine.Logger.Write(LogLevel.Warning, nameof(FluxPlayerControl),
                 $"SessionId={player.InstanceId} Event=PlaybackControlFailed", exception);
         }
         finally
@@ -170,7 +170,7 @@ public sealed partial class FluxPlayerControl
         catch (Exception exception)
         {
             ReportError(exception.Message);
-            Log.Write(LogLevel.Warning, nameof(FluxPlayerControl),
+            FluxEngine.Logger.Write(LogLevel.Warning, nameof(FluxPlayerControl),
                 $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=FullScreenRequestFailed", exception);
         }
         return Task.CompletedTask;

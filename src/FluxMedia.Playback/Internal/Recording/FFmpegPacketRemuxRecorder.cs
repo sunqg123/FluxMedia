@@ -220,7 +220,7 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
                 }
                 throw;
             }
-            Log.Info(nameof(FFmpegPacketRemuxRecorder),
+            FluxEngine.Logger.Info(nameof(FFmpegPacketRemuxRecorder),
                 $"SessionId={_instanceId} Event=RecordingStarted OutputPath={_options.OutputPath} HasVideo={_videoStream is not null} HasAudio={_audioStream is not null}");
         }
     }
@@ -688,10 +688,10 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
             QueueStateChanged();
 
         if (failure is null)
-            Log.Info(nameof(FFmpegPacketRemuxRecorder),
+            FluxEngine.Logger.Info(nameof(FFmpegPacketRemuxRecorder),
                 $"SessionId={_instanceId} Event=RecordingCompleted OutputPath={_options.OutputPath} Packets={writtenPackets}");
         else
-            Log.Error(nameof(FFmpegPacketRemuxRecorder),
+            FluxEngine.Logger.Error(nameof(FFmpegPacketRemuxRecorder),
                 $"SessionId={_instanceId} Event=RecordingFailed OutputPath={_options.OutputPath}", failure);
     }
 
@@ -714,7 +714,7 @@ internal sealed unsafe class FFmpegPacketRemuxRecorder : IAsyncDisposable
                 }
                 catch (Exception exception)
                 {
-                    Log.Write(LogLevel.Warning, nameof(FFmpegPacketRemuxRecorder),
+                    FluxEngine.Logger.Write(LogLevel.Warning, nameof(FFmpegPacketRemuxRecorder),
                         $"SessionId={recorder._instanceId} Event=RecordingStateSubscriberFailed", exception);
                 }
             }

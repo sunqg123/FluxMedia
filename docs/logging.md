@@ -1,35 +1,27 @@
 # 日志
 
-日志直接使用 `LogConverge.Sharp.Log`，不再维护单独的日志配置、队列、输出端和格式化实现。
+播放引擎与 Avalonia 播放控件使用同一个 FluxMedia 日志实例。宿主可以独立使用 LogConverge 的静态入口或自己的实例。
 
 ## 初始化
 
 ```csharp
 using FluxMedia.Playback;
-using LogConverge.Sharp;
 
 FluxEngine.Start(new FluxEngineOptions
 {
     FFmpegPath = Environment.GetEnvironmentVariable("FLUXMEDIA_FFMPEG_ROOT"),
-    EnableLogging = true
+    EnableLogging = true,
+    LogDirectory = Path.Combine("Logs", "FluxMedia")
 });
-Log.Info("Application", "播放器已启动");
 ```
 
-`EnableLogging` 默认关闭。`Start` 调用 `Log.Initialize`，默认目录为
-`Path.Combine(AppContext.BaseDirectory, "Logs")`。返回 `Ok` 或 `AlreadyInitialized`
-才继续初始化 FFmpeg，其余结果直接抛出初始化异常。
+`EnableLogging` 默认关闭，只控制 FluxMedia 的写入。默认目录是程序目录下的 `Logs/FluxMedia`，可用 `LogDirectory` 覆盖。宿主与 FluxMedia 应各用独立目录。
 
-日志配置是进程级的，以首次成功初始化为准，关闭模式也属于初始化。
-宿主如需自定义目录，应在 `FluxEngine.Start` 前自行调用 `Log.Initialize(directory, enabled)`
-并检查结果；引擎会沿用已有实例。运行期间或引擎重新启动时，不会切换目录或开关。
-FFmpeg 初始化失败也不会销毁共享日志，修正 FFmpeg 配置后可重试。
-
-`FluxEngine.Shutdown` 只关闭播放资源，不销毁宿主可能共用的日志。
+`FluxEngine.Shutdown` 排空并释放 FluxMedia 的日志实例。再次启动时按新配置初始化。FFmpeg 初始化失败后释放本次日志实例，可修正配置后重试。
 日志包在正常进程退出时自动排空并释放；强制终止或崩溃不能保证最后的记录落盘。
 文件名、滚动、格式和后台刷新均由 LogConverge 负责。
 
-当前依赖版本为 `0.7.0`，随包提供 Windows x64 原生日志库，启用时自动加载，
+当前依赖版本为 `0.7.1`，随包提供 Windows x64 原生日志库，启用时自动加载，
 不需要另行复制 DLL。其他平台可关闭日志使用播放核心；开启日志时若平台不受支持，
 `Start` 会因日志初始化失败抛出异常。
 
@@ -53,5 +45,5 @@ FFmpeg 初始化失败也不会销毁共享日志，修正 FFmpeg 配置后可�
 
 原 `LoggingOptions`、`LogFileRollingMode`、自有 `LogLevel`、日志输出端和
 `FluxEngine.LogDirectory/CurrentLogFilePath` 已移除，不提供兼容转发。
-目录由首次 `Log.Initialize` 的调用方掌握，文件命名遵循日志包规则。
+宿主通过自己的 `Log.Initialize` 设置业务日志目录，FluxMedia 通过 `FluxEngineOptions.LogDirectory` 设置播放日志目录。文件命名遵循日志包规则。
 日志可能包含路径及异常详情，分享前请过滤认证信息；原始运行日志不提交到 Git。

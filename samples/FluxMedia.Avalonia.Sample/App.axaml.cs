@@ -3,6 +3,7 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using FluxMedia.Avalonia.Sample.Views;
 using FluxMedia.Playback;
+using LogConverge.Sharp;
 using System.Runtime.InteropServices;
 
 namespace FluxMedia.Avalonia.Sample;
@@ -28,6 +29,7 @@ public sealed partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var ffmpegRoot = ResolveFFmpegRoot();
+            Log.Initialize(Path.Combine("Logs", "Sample"), enabled: true);
             FluxEngine.Start(new FluxEngineOptions
             {
                 FFmpegPath = ffmpegRoot,

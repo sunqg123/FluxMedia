@@ -1,4 +1,3 @@
-using LogConverge.Sharp;
 
 namespace FluxMedia.Playback.Internal.Audio;
 
@@ -193,7 +192,7 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
             {
                 LastError = ex.Message;
                 _state = AudioOutputState.Failed;
-                Log.Error(nameof(OpenALPlaybackOutput),
+                FluxEngine.Logger.Error(nameof(OpenALPlaybackOutput),
                     $"SessionId={_instanceId} Event=AudioOutputInitFailed Backend={BackendName} SampleRate={sampleRate} Channels={channels} Error={ex.Message}", ex);
                 ReleaseNativeResources();
             }
@@ -359,7 +358,7 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
             }
             catch (Exception ex)
             {
-                Log.Error(nameof(OpenALPlaybackOutput),
+                FluxEngine.Logger.Error(nameof(OpenALPlaybackOutput),
                     $"SessionId={_instanceId} Event=DisposeAudioError Backend={BackendName} Error={ex.Message}", ex);
             }
             finally
@@ -551,7 +550,7 @@ internal sealed partial class OpenALPlaybackOutput : IAudioOutputDevice
     {
         LastError = message;
         _state = AudioOutputState.Failed;
-        Log.Error(nameof(OpenALPlaybackOutput),
+        FluxEngine.Logger.Error(nameof(OpenALPlaybackOutput),
             $"SessionId={_instanceId} Event=AudioOutputInitFailed Backend={BackendName} Error={message}");
     }
 }

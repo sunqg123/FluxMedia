@@ -114,7 +114,7 @@ Windows 显示实现包含 CPU 位图与 D3D11 共享纹理路径，其它平台
 
 ## 日志与依赖
 
-日志直接使用 LogConverge.Sharp.Log，在 FluxEngine.Start 初始化；输出和进程退出清理由日志包管理。
+播放引擎与播放控件共用 FluxMedia 自己的 LogConverge 实例，在 FluxEngine.Start 初始化，由日志包管理输出和进程退出清理。
 FFmpegLibraries 从绑定常量生成平台库名，并检查完整目录及实际 ABI。
 任意主版本支持尚未实现，直接原生结构布局仍是限制，见 [部署说明](ffmpeg-deployment.md)。
 Shared 中的 IsExternalInit 是 netstandard2.1 的 record/init 编译标记，不是业务兼容层。

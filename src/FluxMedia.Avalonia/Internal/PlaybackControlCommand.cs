@@ -1,4 +1,4 @@
-using LogConverge.Sharp;
+using FluxMedia.Playback;
 using System.Windows.Input;
 
 namespace FluxMedia.Avalonia.Internal;
@@ -59,7 +59,7 @@ internal sealed class PlaybackControlCommand : ICommand
         }
         catch (Exception exception)
         {
-            Log.Error(nameof(PlaybackControlCommand),
+            FluxEngine.Logger.Error(nameof(PlaybackControlCommand),
                 "Event=ControlCommandFailed", exception);
         }
         finally

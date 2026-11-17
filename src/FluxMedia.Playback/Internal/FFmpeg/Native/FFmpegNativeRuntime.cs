@@ -1,6 +1,5 @@
 using FFmpeg.AutoGen;
 using FluxMedia.Playback;
-using LogConverge.Sharp;
 using System.Runtime.InteropServices;
 
 namespace FluxMedia.FFmpeg.Native;
@@ -54,7 +53,7 @@ internal static unsafe class FFmpegNativeRuntime
                 if (result < 0)
                     throw new InvalidOperationException($"FFmpeg 网络初始化失败：{result}。");
                 networkInitialized = true;
-                Log.Info(nameof(FFmpegNativeRuntime),
+                FluxEngine.Logger.Info(nameof(FFmpegNativeRuntime),
                     $"Event=FFmpegInitialized BindingVersion={FFmpegLibraries.BindingVersion} Version={version} RootPath={rootPath}");
                 _isInitialized = true;
             }

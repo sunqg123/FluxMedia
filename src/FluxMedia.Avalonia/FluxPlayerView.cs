@@ -422,7 +422,7 @@ public sealed class FluxPlayerView : UserControl
             if (!_isDetached && version == _attachmentVersion)
             {
                 _gpuPresentationError = exception.Message;
-                Log.Write(LogLevel.Warning, nameof(FluxPlayerView),
+                FluxEngine.Logger.Write(LogLevel.Warning, nameof(FluxPlayerView),
                     $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=GpuPresenterInitFailed", exception);
                 DisposeGpuPresenter();
             }
@@ -461,7 +461,7 @@ public sealed class FluxPlayerView : UserControl
                 _gpuFramePresented = false;
                 _gpuPresentationError = exception.Message;
                 _image.IsVisible = true;
-                Log.Write(LogLevel.Warning, nameof(FluxPlayerView),
+                FluxEngine.Logger.Write(LogLevel.Warning, nameof(FluxPlayerView),
                     $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=GpuPresentationDisabled", exception);
                 DisposeGpuPresenter();
             }
@@ -537,7 +537,7 @@ public sealed class FluxPlayerView : UserControl
         }
         catch (Exception exception)
         {
-            Log.Error(nameof(FluxPlayerView),
+            FluxEngine.Logger.Error(nameof(FluxPlayerView),
                 $"SessionId={instanceId} Event=GpuPresenterCleanupFailed", exception);
         }
     }

@@ -4,7 +4,6 @@ using FluxMedia.FFmpeg.Extensions;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal.Hardware;
-using LogConverge.Sharp;
 using System.Runtime.InteropServices;
 using CorePixelFormat = FluxMedia.Core.Models.PixelFormat;
 
@@ -116,7 +115,7 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             if (codecOpenResult < 0 && (d3d11Hardware is not null || vaapiHardware is not null) && _options.VideoAcceleration == VideoAccelerationMode.Auto)
             {
                 var failedBackend = d3d11Hardware is not null ? "D3D11VA" : "VAAPI";
-                Log.Warning(nameof(FFmpegPacketVideoPlaybackWorker),
+                FluxEngine.Logger.Warning(nameof(FFmpegPacketVideoPlaybackWorker),
                     $"SessionId={_context.InstanceId} Event=HardwareDecoderOpenFallback Backend={failedBackend} Error={FFmpegErrorHelper.GetErrorMessage(codecOpenResult)}");
                 d3d11Hardware?.Dispose();
                 d3d11Hardware = null;
@@ -297,7 +296,7 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             {
                 if (!failed)
                     throw cleanupFailure;
-                Log.Error(nameof(FFmpegPacketVideoPlaybackWorker),
+                FluxEngine.Logger.Error(nameof(FFmpegPacketVideoPlaybackWorker),
                     $"SessionId={_context.InstanceId} Event=VideoCleanupFailed", cleanupFailure);
             }
         }

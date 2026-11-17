@@ -3,7 +3,6 @@ using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.Playback;
 using FluxMedia.Playback.Internal;
-using LogConverge.Sharp;
 using System.Collections.Concurrent;
 using System.Threading.Channels;
 
@@ -263,7 +262,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
         }
         catch (Exception exception)
         {
-            Log.Error(nameof(FFmpegSharedDemuxer),
+            FluxEngine.Logger.Error(nameof(FFmpegSharedDemuxer),
                 $"SessionId={_instanceId} Event=DemuxerCancelFailed", exception);
         }
         CompletePendingSeekRequests(new OperationCanceledException("The demuxer has been stopped."));
@@ -302,7 +301,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             }
             catch (Exception exception)
             {
-                Log.Error(nameof(FFmpegSharedDemuxer),
+                FluxEngine.Logger.Error(nameof(FFmpegSharedDemuxer),
                     $"SessionId={demuxer._instanceId} Event=DeferredDemuxerCleanupFailed", exception);
             }
         }, this, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);

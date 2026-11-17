@@ -17,12 +17,17 @@ public sealed record FluxEngineOptions
     }
 
     /// <summary>
-    /// 是否启用 LogConverge 文件日志，进程内首次初始化生效。
+    /// 是否启用 FluxMedia 自己的文件日志。
     /// </summary>
     public bool EnableLogging
     {
         get; init;
     }
+
+    /// <summary>
+    /// FluxMedia 日志目录，默认使用程序目录下的 Logs/FluxMedia。
+    /// </summary>
+    public string? LogDirectory { get; init; }
 
     /// <summary>
     /// 全部播放器允许的最低倍速，必须大于 0 且不超过 1。

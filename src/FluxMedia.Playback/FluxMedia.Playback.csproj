@@ -16,7 +16,7 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): updates LogConverge.Sharp to 0.7.1. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): uses a dedicated LogConverge instance with its own logging switch and directory. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
   </PropertyGroup>
@@ -41,6 +41,7 @@
     <PackageReference Include="System.Threading.Channels" Version="6.0.0" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="FluxMedia.Avalonia" />
     <Compile Include="..\Shared\CompilerServices\IsExternalInit.cs" Link="CompilerServices\IsExternalInit.cs" />
   </ItemGroup>
 </Project>

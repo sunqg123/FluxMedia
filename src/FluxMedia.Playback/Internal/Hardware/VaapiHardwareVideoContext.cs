@@ -80,7 +80,7 @@ internal sealed unsafe class VaapiHardwareVideoContext : IDisposable
             error = ex.Message;
             context?.Dispose();
             context = null;
-            Log.Write(LogLevel.Warning, nameof(VaapiHardwareVideoContext),
+            FluxEngine.Logger.Write(LogLevel.Warning, nameof(VaapiHardwareVideoContext),
                 $"SessionId={instanceId} Event=HardwareVideoDeviceCreateFailed Backend=VAAPI Error={ex.Message}", ex);
             return false;
         }

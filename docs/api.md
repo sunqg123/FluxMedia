@@ -220,7 +220,7 @@ PlaybackRecordingOptions 不再提供 VideoBitrateKbps；重封装沿用源编�
 同一播放器显式打开媒体时会结束旧录制，包括再次打开相同地址；内部网络恢复沿用录制转移流程。
 录制收尾失败时保留失败诊断并发出 `Faulted`；打开新媒体和停止播放会在旧管线清理后抛出
 `PlaybackException`，其 `PlaybackError` 为 `RecordingFailed`。切源不会继续打开新媒体并覆盖旧录制错误。
-日志由 `LogConverge.Sharp.Log` 提供，在 `FluxEngine.Start` 初始化，见 [日志说明](logging.md)。
+播放日志由 FluxMedia 自己的 LogConverge 实例提供，在 `FluxEngine.Start` 初始化，见 [日志说明](logging.md)。
 
 停止录制的取消令牌在接受停止前生效；开始收尾后会等待排空、封装和释放，
 返回实际文件结果，避免已完成的文件被标记为取消失败。

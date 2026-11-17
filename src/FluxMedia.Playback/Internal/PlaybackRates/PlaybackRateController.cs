@@ -362,7 +362,7 @@ internal sealed class PlaybackRateController
             RefreshLocked("Rejected", error.Message, requestId: request.Id);
             SignalLocked();
         }
-        Log.Write(LogLevel.Warning, nameof(PlaybackRateController),
+        FluxEngine.Logger.Write(LogLevel.Warning, nameof(PlaybackRateController),
             $"SessionId={_instanceId} Event=RateBuildRejected RequestId={request.Id} Rate={request.Rate}", error);
         Notify();
     }
@@ -496,7 +496,7 @@ internal sealed class PlaybackRateController
             RefreshLocked("Faulted", error.Message, requestId: failedRequestId);
             SignalLocked();
         }
-        Log.Error(nameof(PlaybackRateController),
+        FluxEngine.Logger.Error(nameof(PlaybackRateController),
             $"SessionId={_instanceId} Event={eventName} RequestId={request.Id} Generation={generation}", error);
         CommitFaulted?.Invoke(generation, error);
         Notify();
@@ -627,7 +627,7 @@ internal sealed class PlaybackRateController
         }
         catch (Exception error)
         {
-            Log.Write(LogLevel.Warning, nameof(PlaybackRateController),
+            FluxEngine.Logger.Write(LogLevel.Warning, nameof(PlaybackRateController),
                 $"SessionId={_instanceId} Event=RateNotificationFailed", error);
         }
     }

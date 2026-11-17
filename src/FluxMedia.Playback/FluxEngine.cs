@@ -18,6 +18,10 @@ public static class FluxEngine
     /// </summary>
     private static readonly Dictionary<Guid, Player> ActivePlayers = new();
     /// <summary>
+    /// 播放核心与播放控件使用的独立日志实例。
+    /// </summary>
+    internal static LogInstance Logger { get; } = new();
+    /// <summary>
     /// 当前启动配置；未启动时为空。
     /// </summary>
     private static FluxEngineOptions? _options;
@@ -72,18 +76,24 @@ public static class FluxEngine
             }
             var actual = options ?? new FluxEngineOptions();
             PlaybackRatePolicy.ValidateOptions(actual);
-            var logResult = Log.Initialize(Path.Combine(AppContext.BaseDirectory, "Logs"), actual.EnableLogging);
-            if (logResult is not LogResult.Ok and not LogResult.AlreadyInitialized)
+            // 上一次关闭若超时，先尝试释放旧实例。
+            var logResult = Logger.Destroy();
+            if (logResult != LogResult.Ok)
+                throw new InvalidOperationException($"旧日志实例释放失败：{logResult}。");
+            var logDirectory = actual.LogDirectory ?? Path.Combine(AppContext.BaseDirectory, "Logs", "FluxMedia");
+            logResult = Logger.Initialize(logDirectory, actual.EnableLogging);
+            if (logResult != LogResult.Ok)
                 throw new InvalidOperationException($"日志初始化失败：{logResult}。");
             try
             {
                 FFmpegNativeRuntime.Initialize(actual.FFmpegPath);
                 _options = actual;
-                Log.Info(nameof(FluxEngine), "Event=EngineStarted");
+                Logger.Info(nameof(FluxEngine), "Event=EngineStarted");
             }
             catch (Exception exception)
             {
-                Log.Error(nameof(FluxEngine), "Event=EngineStartFailed", exception);
+                Logger.Error(nameof(FluxEngine), "Event=EngineStartFailed", exception);
+                Logger.Destroy();
                 throw;
             }
         }
@@ -154,23 +164,25 @@ public static class FluxEngine
             }
             catch (Exception exception) { errors.Add(exception); }
             Release(FFmpegNativeRuntime.Shutdown);
+            if (errors.Count == 0)
+                Logger.Info(nameof(FluxEngine), "Event=EngineStopped");
+            else
+                Logger.Error(nameof(FluxEngine), "Event=EngineShutdownFailed", new AggregateException(errors));
         }
         finally
         {
+            var logResult = Logger.Destroy();
             lock (SyncRoot)
             {
                 ActivePlayers.Clear();
                 _options = null;
                 _shutdownTask = null;
             }
+            if (logResult != LogResult.Ok)
+                errors.Add(new InvalidOperationException($"日志实例释放失败：{logResult}。"));
         }
         if (errors.Count > 0)
-        {
-            var failure = new AggregateException("引擎关闭期间发生资源释放错误。", errors);
-            Log.Error(nameof(FluxEngine), "Event=EngineShutdownFailed", failure);
-            throw failure;
-        }
-        Log.Info(nameof(FluxEngine), "Event=EngineStopped");
+            throw new AggregateException("引擎关闭期间发生资源释放错误。", errors);
 
         // 播放器释放失败后仍关闭共享原生环境。
         void Release(Action release)

@@ -3,7 +3,6 @@ using FluxMedia.FFmpeg.Extensions;
 using FluxMedia.FFmpeg.Native;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal.Audio;
-using LogConverge.Sharp;
 
 namespace FluxMedia.Playback.Internal;
 
@@ -315,7 +314,7 @@ internal sealed unsafe class FFmpegPacketAudioPlaybackWorker : IDisposable
             {
                 if (!failed)
                     throw cleanupFailure;
-                Log.Error(nameof(FFmpegPacketAudioPlaybackWorker),
+                FluxEngine.Logger.Error(nameof(FFmpegPacketAudioPlaybackWorker),
                     $"SessionId={_context.InstanceId} Event=AudioCleanupFailed", cleanupFailure);
             }
 

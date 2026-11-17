@@ -1,5 +1,5 @@
+using FluxMedia.Playback;
 using FluxMedia.Core.Errors;
-using LogConverge.Sharp;
 
 namespace FluxMedia.Core.State;
 
@@ -115,7 +115,7 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
     /// </summary>
     protected void NotifyFault(FluxMediaError error, Exception? exception = null)
     {
-        Log.Error(ComponentName,
+        FluxEngine.Logger.Error(ComponentName,
             $"SessionId={InstanceId} Event=PlaybackFault Code={error.Code} State={error.CurrentState} Message={error.Message}", exception);
         InvokeSubscribersSafely(Faulted, error, nameof(Faulted));
     }
@@ -135,7 +135,7 @@ internal abstract class AsyncMediaStateMachine<TState> : IAsyncDisposable where 
             }
             catch (Exception ex)
             {
-                Log.Error(ComponentName,
+                FluxEngine.Logger.Error(ComponentName,
                     $"SessionId={InstanceId} Event=SubscriberFault SubscriberEvent={eventName} Error={ex.Message}", ex);
             }
         }

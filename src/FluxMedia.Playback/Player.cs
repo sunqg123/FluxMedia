@@ -483,7 +483,7 @@ public sealed partial class Player : IAsyncDisposable
             }
             catch (Exception exception)
             {
-                Log.Write(LogLevel.Warning, nameof(Player),
+                FluxEngine.Logger.Write(LogLevel.Warning, nameof(Player),
                     $"SessionId={InstanceId} Event=SubscriberFailed Notification={eventName}", exception);
             }
         }

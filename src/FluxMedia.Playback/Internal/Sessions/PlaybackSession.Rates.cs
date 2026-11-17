@@ -1,5 +1,4 @@
 using FluxMedia.Playback.Internal;
-using LogConverge.Sharp;
 
 namespace FluxMedia.Playback;
 
@@ -36,7 +35,7 @@ internal sealed partial class PlaybackSession
         var actual = valid && CanSeekCurrentSource() ? requested : PlaybackRatePolicy.Normal;
         if (!valid || actual != requested)
         {
-            Log.Warning(nameof(PlaybackSession),
+            FluxEngine.Logger.Warning(nameof(PlaybackSession),
                 $"SessionId={InstanceId} Event=InitialPlaybackRateRejected RequestedRate={requested} MinRate={_engineOptions.MinPlaybackRate} MaxRate={_engineOptions.MaxPlaybackRate} AppliedRate={actual} Budget={_engineOptions.MaxAudioTempoStages} Reason={error ?? "当前媒体不支持倍速"}");
         }
         _rates.Submit(actual, defer: true);
@@ -100,7 +99,7 @@ internal sealed partial class PlaybackSession
         }
         catch (Exception exception)
         {
-            Log.Error(nameof(PlaybackSession),
+            FluxEngine.Logger.Error(nameof(PlaybackSession),
                 $"SessionId={InstanceId} Event=RateCommitFaultReportFailed", exception);
         }
         finally

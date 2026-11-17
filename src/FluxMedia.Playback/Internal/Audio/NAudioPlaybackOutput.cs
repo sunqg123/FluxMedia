@@ -1,4 +1,3 @@
-using LogConverge.Sharp;
 using NAudio.Wave;
 
 namespace FluxMedia.Playback.Internal.Audio;
@@ -91,7 +90,7 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
         {
             LastError = ex.Message;
             _state = AudioOutputState.Failed;
-            Log.Error(nameof(NAudioPlaybackOutput),
+            FluxEngine.Logger.Error(nameof(NAudioPlaybackOutput),
                 $"SessionId={_instanceId} Event=AudioOutputInitFailed Backend={BackendName} SampleRate={sampleRate} Channels={channels} Error={ex.Message}", ex);
             Dispose();
         }
@@ -233,7 +232,7 @@ internal sealed class NAudioPlaybackOutput : IAudioOutputDevice
             return;
         LastError = args.Exception.Message;
         _state = AudioOutputState.Failed;
-        Log.Error(nameof(NAudioPlaybackOutput),
+        FluxEngine.Logger.Error(nameof(NAudioPlaybackOutput),
             $"SessionId={_instanceId} Event=AudioOutputPlaybackStoppedUnexpectedly Backend={BackendName} Error={args.Exception.Message}", args.Exception);
     }
 }

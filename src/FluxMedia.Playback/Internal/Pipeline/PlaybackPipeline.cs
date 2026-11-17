@@ -1,7 +1,6 @@
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Pipeline;
 using FluxMedia.Playback.Internal.Audio;
-using LogConverge.Sharp;
 
 namespace FluxMedia.Playback.Internal;
 
@@ -298,7 +297,7 @@ internal sealed partial class PlaybackPipeline : IAsyncDisposable
         }
         catch (Exception exception)
         {
-            Log.Error(nameof(PlaybackPipeline),
+            FluxEngine.Logger.Error(nameof(PlaybackPipeline),
                 $"SessionId={_instanceId} Event=PipelineStopSignalFailed", exception);
         }
     }

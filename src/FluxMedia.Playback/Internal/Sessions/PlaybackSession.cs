@@ -329,7 +329,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                     throw new InvalidOperationException("当前媒体没有视频流。");
                 ConfigureInitialRate();
                 await TransitionAsync(PlaybackState.Ready, cancellationToken).ConfigureAwait(false);
-                Log.Info(ComponentName,
+                FluxEngine.Logger.Info(ComponentName,
                     $"SessionId={InstanceId} Event=MediaOpened SourceKind={source.Kind} IsLive={IsLive} Duration={Duration}");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested || _operationCts?.IsCancellationRequested != false)
@@ -679,7 +679,7 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 return ControlFailure(PlaybackError.InvalidState, "当前状态无法开始录制。");
             var result = await _recording.StartAsync(options, Demuxer).ConfigureAwait(false);
             if (!result.IsSuccess)
-                Log.Error(ComponentName, $"SessionId={InstanceId} Event=RecordingStartFailed Message={result.Message}");
+                FluxEngine.Logger.Error(ComponentName, $"SessionId={InstanceId} Event=RecordingStartFailed Message={result.Message}");
             return result;
         }
         finally { _pipelineMutationGate.Release(); }
@@ -1066,19 +1066,19 @@ internal sealed partial class PlaybackSession : AsyncMediaStateMachine<PlaybackS
                 attempt++;
                 var resumePlaying = State != PlaybackState.Paused && !_isPaused;
                 var startPosition = CanSeekCurrentSource() ? _currentTime : TimeSpan.Zero;
-                Log.Warning(ComponentName,
+                FluxEngine.Logger.Warning(ComponentName,
                     $"SessionId={InstanceId} Event=NetworkRecoveryStart Attempt={attempt} Reason={reason} ResumePlaying={resumePlaying} Start={startPosition}");
                 try
                 {
                     await RestartPlaybackWorkerCoreAsync(startPosition, resumePlaying, operationToken).ConfigureAwait(false);
-                    Log.Info(ComponentName, $"SessionId={InstanceId} Event=NetworkRecovered Attempt={attempt}");
+                    FluxEngine.Logger.Info(ComponentName, $"SessionId={InstanceId} Event=NetworkRecovered Attempt={attempt}");
                     return;
                 }
                 catch (OperationCanceledException) when (operationToken.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     reason = ex.Message;
-                    Log.Write(LogLevel.Warning, ComponentName,
+                    FluxEngine.Logger.Write(LogLevel.Warning, ComponentName,
                         $"SessionId={InstanceId} Event=NetworkRecoveryAttemptFailed Attempt={attempt}", ex);
                     if (attempt < maxAttempts)
                         await Task.Delay(_currentOptions.Network.ReconnectDelay, operationToken).ConfigureAwait(false);
