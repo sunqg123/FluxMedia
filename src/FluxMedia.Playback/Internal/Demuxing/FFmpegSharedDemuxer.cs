@@ -14,6 +14,26 @@ namespace FluxMedia.FFmpeg.Pipeline;
 internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 {
     /// <summary>
+    /// 本地文件扩展读前时可缓存的视频包总数。
+    /// </summary>
+    private const int LocalVideoPacketLimit = 256;
+
+    /// <summary>
+    /// 本地文件扩展读前时可缓存的音频包总数。
+    /// </summary>
+    private const int LocalAudioPacketLimit = 512;
+
+    /// <summary>
+    /// 本地视频压缩包的累计字节预算。
+    /// </summary>
+    private const long LocalVideoPacketBytesLimit = 32L * 1024 * 1024;
+
+    /// <summary>
+    /// 本地音频压缩包的累计字节预算。
+    /// </summary>
+    private const long LocalAudioPacketBytesLimit = 4L * 1024 * 1024;
+
+    /// <summary>
     /// 源。
     /// </summary>
     private readonly MediaSource _source;
@@ -110,8 +130,11 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
             audioQueueCapacity = Math.Max(audioQueueCapacity, 384);
         }
 
-        _videoPackets = new FFmpegPacketQueue(videoQueueCapacity, requireKeyFrameAfterOverflow: _dropPacketsForLowLatency);
-        _audioPackets = new FFmpegPacketQueue(audioQueueCapacity);
+        var localFile = source.Kind == MediaSourceKind.File;
+        _videoPackets = new FFmpegPacketQueue(videoQueueCapacity, requireKeyFrameAfterOverflow: _dropPacketsForLowLatency,
+            maxPacketCount: localFile ? LocalVideoPacketLimit : 0, packetBytesLimit: localFile ? LocalVideoPacketBytesLimit : 0);
+        _audioPackets = new FFmpegPacketQueue(audioQueueCapacity,
+            maxPacketCount: localFile ? LocalAudioPacketLimit : 0, packetBytesLimit: localFile ? LocalAudioPacketBytesLimit : 0);
     }
 
     /// <summary>
@@ -414,6 +437,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                 throw new InvalidOperationException("FFmpeg packet allocation failed.");
             }
             Func<bool> seekPending = () => !_seekRequests.IsEmpty;
+            var interleavedFile = _source.Kind == MediaSourceKind.File && VideoStream is not null && AudioStream is not null;
             while (!_disposed && !cancellationToken.IsCancellationRequested)
             {
                 while (_seekRequests.TryDequeue(out var seek))
@@ -483,11 +507,13 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
                 {
                     if (VideoStream is not null && packet->stream_index == VideoStream.StreamIndex)
                     {
-                        RoutePacketWithBackpressure(_videoPackets, FFmpegPacketLease.Clone(packet, PacketGeneration), cancellationToken);
+                        RoutePacketWithBackpressure(_videoPackets, interleavedFile ? _audioPackets : null,
+                            FFmpegPacketLease.Clone(packet, PacketGeneration), cancellationToken);
                     }
                     else if (AudioStream is not null && packet->stream_index == AudioStream.StreamIndex)
                     {
-                        RoutePacketWithBackpressure(_audioPackets, FFmpegPacketLease.Clone(packet, PacketGeneration), cancellationToken);
+                        RoutePacketWithBackpressure(_audioPackets, interleavedFile ? _videoPackets : null,
+                            FFmpegPacketLease.Clone(packet, PacketGeneration), cancellationToken);
                     }
                 }
                 finally
@@ -560,7 +586,7 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
     /// 按延迟策略丢包或等待队列腾出空间。
     /// </summary>
     private bool RoutePacketWithBackpressure(
-        FFmpegPacketQueue queue, FFmpegPacketLease packet, CancellationToken cancellationToken)
+        FFmpegPacketQueue queue, FFmpegPacketQueue? otherQueue, FFmpegPacketLease packet, CancellationToken cancellationToken)
     {
         if (_dropPacketsForLowLatency)
         {
@@ -569,7 +595,9 @@ internal sealed unsafe partial class FFmpegSharedDemuxer : IDisposable
 
         while (!_disposed && !cancellationToken.IsCancellationRequested)
         {
-            if (queue.TryWriteOrderedWithoutDrop(packet))
+            // 另一轨缺包时使用预留容量，以便继续读取交错排列的媒体包。
+            var canReadAhead = !queue.HasReachedReadAheadTarget || (otherQueue is not null && !otherQueue.HasReachedReadAheadTarget);
+            if (canReadAhead && queue.TryWriteOrderedWithoutDrop(packet))
                 return true;
             if (!_seekRequests.IsEmpty)
             {

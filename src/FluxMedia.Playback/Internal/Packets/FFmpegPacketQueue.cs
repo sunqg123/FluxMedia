@@ -19,6 +19,21 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     private readonly ChannelReader<FFmpegPacketLease> _reader;
 
     /// <summary>
+    /// 两条轨道都有数据时的读前包数目标。
+    /// </summary>
+    private readonly int _readAheadTarget;
+
+    /// <summary>
+    /// 有序队列的压缩数据字节预算，为零时不额外限制。
+    /// </summary>
+    private readonly long _packetBytesLimit;
+
+    /// <summary>
+    /// 当前缓存的数据包有效字节数，由同步锁保护。
+    /// </summary>
+    private long _queuedPacketBytes;
+
+    /// <summary>
     /// 保护共享状态的同步锁。
     /// </summary>
     private readonly object _sync = new();
@@ -81,12 +96,15 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     /// <summary>
     /// 初始化 FFmpeg 数据包队列所需的状态和资源。
     /// </summary>
-    public FFmpegPacketQueue(int capacity, AVRational timeBase = default, TimeSpan? fallbackPacketDuration = null, bool requireKeyFrameAfterOverflow = false)
+    public FFmpegPacketQueue(int capacity, AVRational timeBase = default, TimeSpan? fallbackPacketDuration = null,
+        bool requireKeyFrameAfterOverflow = false, int maxPacketCount = 0, long packetBytesLimit = 0)
     {
+        _readAheadTarget = Math.Max(1, capacity);
+        _packetBytesLimit = packetBytesLimit;
         _requireKeyFrameAfterOverflow = requireKeyFrameAfterOverflow;
         _timeBase = timeBase.num == 0 || timeBase.den == 0 ? new AVRational { num = 1, den = ffmpeg.AV_TIME_BASE } : timeBase;
         _fallbackPacketDuration = fallbackPacketDuration ?? TimeSpan.FromMilliseconds(33);
-        _channel = Channel.CreateBounded<FFmpegPacketLease>(new BoundedChannelOptions(Math.Max(1, capacity))
+        _channel = Channel.CreateBounded<FFmpegPacketLease>(new BoundedChannelOptions(Math.Max(_readAheadTarget, maxPacketCount))
         {
             FullMode = BoundedChannelFullMode.Wait,
             SingleReader = false,
@@ -119,6 +137,11 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     /// 当前缓存的数据包数量。
     /// </summary>
     public int Count => Volatile.Read(ref _queuedPacketCount);
+
+    /// <summary>
+    /// 当前包数是否达到常规读前目标。
+    /// </summary>
+    public bool HasReachedReadAheadTarget => Count >= _readAheadTarget;
 
     /// <summary>
     /// 设置数据包时间基、默认时长和时间起点。
@@ -206,6 +229,9 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
         lock (_sync)
         {
             ThrowIfDisposed();
+            // 允许空队列接纳一枚超大包，否则无法继续读取。
+            if (_packetBytesLimit > 0 && Count > 0 && Math.Max(0, packet.Packet->size) > _packetBytesLimit - _queuedPacketBytes)
+                return false;
             if (!_channel.Writer.TryWrite(packet))
                 return false;
             OnPacketEnqueued(packet);
@@ -283,6 +309,8 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
         var timestamp = GetPacketTimestamp(packet);
         lock (_sync)
         {
+            if (_packetBytesLimit > 0)
+                _queuedPacketBytes += Math.Max(0, packet.Packet->size);
             if (timestamp is null)
             {
                 Interlocked.Increment(ref _queuedPacketCount);
@@ -305,6 +333,8 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
         var timestamp = GetPacketTimestamp(packet);
         lock (_sync)
         {
+            if (_packetBytesLimit > 0)
+                _queuedPacketBytes -= Math.Max(0, packet.Packet->size);
             var count = Math.Max(0, Interlocked.Decrement(ref _queuedPacketCount));
             if (count == 0)
             {
@@ -333,6 +363,7 @@ internal sealed unsafe partial class FFmpegPacketQueue : IDisposable
     /// </summary>
     private void ResetTimestamps()
     {
+        _queuedPacketBytes = 0;
         _firstTimestamp = null;
         _lastTimestamp = null;
         _bufferedDuration = TimeSpan.Zero;

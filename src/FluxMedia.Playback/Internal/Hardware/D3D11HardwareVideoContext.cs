@@ -2,6 +2,7 @@ using FFmpeg.AutoGen;
 using FluxMedia.Core.Models;
 using FluxMedia.FFmpeg.Native;
 using LogConverge.Sharp;
+using Silk.NET.Core;
 using Silk.NET.Core.Native;
 using Silk.NET.Direct3D11;
 using Silk.NET.DXGI;
@@ -102,6 +103,9 @@ internal sealed unsafe class D3D11HardwareVideoContext : IDisposable
                 _hardwarePixelFormat = hardwarePixelFormat
             };
             context = created;
+            // FFmpeg 接收外部设备时，不会像自建设备时那样开启线程保护。
+            using var multithread = deviceContext.Handle->QueryInterface<ID3D11Multithread>();
+            multithread.Handle->SetMultithreadProtected(new Bool32(true));
             created.InitializeFFmpegDevice();
 
             return true;

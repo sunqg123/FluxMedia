@@ -16,7 +16,7 @@
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
     <IncludeSymbols>false</IncludeSymbols>
-    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): uses a dedicated LogConverge instance with its own logging switch and directory. FFmpeg.AutoGen $(FFmpegAutoGenVersion); native libraries must match the selected binding ABI.</PackageReleaseNotes>
+    <PackageReleaseNotes>FluxMedia $(FluxMediaVersion): fixes stalled video and audio/video desynchronization in local files with uneven packet interleaving. Bounded read-ahead lets one track receive packets while the other track is backed up. Native FFmpeg libraries must match the FFmpeg.AutoGen $(FFmpegAutoGenVersion) binding ABI.</PackageReleaseNotes>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);NU5128;CS1591</NoWarn>
   </PropertyGroup>

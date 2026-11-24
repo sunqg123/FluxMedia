@@ -111,6 +111,9 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             FFmpegErrorHelper.ThrowIfError(ffmpeg.avcodec_parameters_to_context(codecContext, _input.Stream.CodecParameters), "avcodec_parameters_to_context");
             ConfigureHardwareDecoder(codec, codecContext, out d3d11Hardware, out vaapiHardware);
 
+            var backend = d3d11Hardware is not null ? "D3D11VA" : vaapiHardware is not null ? "VAAPI" : "Software";
+            FluxEngine.Logger.Info(nameof(FFmpegPacketVideoPlaybackWorker),
+                $"SessionId={_context.InstanceId} Event=VideoDecoderOpening Backend={backend} Codec={codecContext->codec_id} Size={codecContext->width}x{codecContext->height}");
             var codecOpenResult = ffmpeg.avcodec_open2(codecContext, codec, null);
             if (codecOpenResult < 0 && (d3d11Hardware is not null || vaapiHardware is not null) && _options.VideoAcceleration == VideoAccelerationMode.Auto)
             {
@@ -130,6 +133,8 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
             }
 
             FFmpegErrorHelper.ThrowIfError(codecOpenResult, "avcodec_open2");
+            var firstPacket = true;
+            var firstFrame = true;
 
             frame = ffmpeg.av_frame_alloc();
             if (frame == null)
@@ -188,6 +193,12 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         _callbacks.PacketConsumed?.Invoke((nint)packetLease.Packet);
                     }
                     // 空包通知解码器输出 B 帧等延迟帧。
+                    if (firstPacket && packetLease is not null)
+                    {
+                        firstPacket = false;
+                        FluxEngine.Logger.Info(nameof(FFmpegPacketVideoPlaybackWorker),
+                            $"SessionId={_context.InstanceId} Event=VideoFirstPacketSending Bytes={packetLease.Packet->size}");
+                    }
                     FFmpegErrorHelper.ThrowIfError(ffmpeg.avcodec_send_packet(codecContext, packetLease is null ? null : packetLease.Packet), "avcodec_send_packet");
                     while (!_disposed && !cancellationToken.IsCancellationRequested)
                     {
@@ -203,6 +214,12 @@ internal sealed unsafe class FFmpegPacketVideoPlaybackWorker : IDisposable
                         }
 
                         FFmpegErrorHelper.ThrowIfError(receive, "avcodec_receive_frame");
+                        if (firstFrame)
+                        {
+                            firstFrame = false;
+                            FluxEngine.Logger.Info(nameof(FFmpegPacketVideoPlaybackWorker),
+                                $"SessionId={_context.InstanceId} Event=VideoFirstFrameDecoded Format={(AVPixelFormat)frame->format} Size={frame->width}x{frame->height}");
+                        }
                         var timestamp = TimestampFromFrame(frame, _input.Stream.TimeBase, _input.Stream.StartTime, sequence, fallbackFrameInterval, lastTimestamp);
                         lastTimestamp = timestamp;
                         if (ShouldDropPrerollFrame(timestamp, ref prerollDropUntil))

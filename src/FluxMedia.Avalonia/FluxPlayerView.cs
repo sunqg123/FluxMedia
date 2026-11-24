@@ -444,11 +444,21 @@ public sealed class FluxPlayerView : UserControl
             var surface = lease.Frame.GpuSurface;
             if (surface is null || !lease.Frame.IsCurrent || !IsCurrentDisplay(version, presenter))
                 return;
+            if (!_gpuFramePresented)
+            {
+                FluxEngine.Logger.Info(nameof(FluxPlayerView),
+                    $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=GpuFirstFrameSubmitting Surface={surface.Kind} Size={surface.Width}x{surface.Height}");
+            }
             await presenter.PresentAsync(surface);
             if (!lease.Frame.IsCurrent || !IsCurrentDisplay(version, presenter))
                 return;
             if (_gpuVisual is not null)
                 _gpuVisual.Surface = presenter.Surface;
+            if (!_gpuFramePresented)
+            {
+                FluxEngine.Logger.Info(nameof(FluxPlayerView),
+                    $"SessionId={Player?.InstanceId ?? Guid.Empty} Event=GpuFirstFramePresented");
+            }
             _gpuFramePresented = true;
             _gpuPresentationError = null;
             _image.IsVisible = false;

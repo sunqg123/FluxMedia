@@ -30,6 +30,8 @@ public sealed partial class App : Application
         {
             var ffmpegRoot = ResolveFFmpegRoot();
             Log.Initialize(Path.Combine("Logs", "Sample"), enabled: true);
+            Log.Info(nameof(App),
+                $"Event=SampleStarting PlaybackVersion={typeof(Player).Assembly.GetName().Version} Runtime={RuntimeInformation.FrameworkDescription} Architecture={RuntimeInformation.ProcessArchitecture}");
             FluxEngine.Start(new FluxEngineOptions
             {
                 FFmpegPath = ffmpegRoot,

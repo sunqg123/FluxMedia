@@ -52,7 +52,7 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     private readonly ComPtr<ID3D11VideoProcessor> _processor;
 
     /// <summary>
-    /// 可用。
+    /// 等待解码线程检查的归还纹理。
     /// </summary>
     private readonly Queue<D3D11SharedSurface> _available = new();
 
@@ -124,11 +124,6 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     /// </summary>
     public D3D11GpuFrameOwner Convert(D3DTexture2D* inputTexture, uint arraySlice)
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(D3D11VideoProcessor));
-        }
-
         var surface = RentSurface();
         try
         {
@@ -190,18 +185,18 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     }
 
     /// <summary>
-    /// 将不再使用的纹理归还表面池。
+    /// 归还纹理，互斥锁由解码线程在租用时检查。
     /// </summary>
     internal void Return(D3D11SharedSurface surface)
     {
         lock (_surfaceSync)
         {
-            if (_disposed || _available.Count >= SurfacePoolLimit || !surface.TryResetForReuse())
+            if (!_disposed && _available.Count < SurfacePoolLimit)
             {
-                surface.Dispose();
+                _available.Enqueue(surface);
                 return;
             }
-            _available.Enqueue(surface);
+            surface.Dispose();
         }
     }
 
@@ -210,12 +205,25 @@ internal sealed unsafe class D3D11VideoProcessor : IDisposable
     /// </summary>
     private D3D11SharedSurface RentSurface()
     {
-        lock (_surfaceSync)
+        while (true)
         {
-            if (_disposed)
-                throw new ObjectDisposedException(nameof(D3D11VideoProcessor));
-            if (_available.Count > 0)
-                return _available.Dequeue();
+            D3D11SharedSurface surface;
+            lock (_surfaceSync)
+            {
+                if (_disposed)
+                    throw new ObjectDisposedException(nameof(D3D11VideoProcessor));
+                if (_available.Count == 0)
+                    break;
+
+                surface = _available.Dequeue();
+            }
+
+            if (surface.TryResetForReuse())
+            {
+                return surface;
+            }
+
+            surface.Dispose();
         }
         return new D3D11SharedSurface(_device, _videoDevice, _enumerator, _width, _height);
     }
